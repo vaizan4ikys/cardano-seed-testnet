@@ -12,4 +12,5 @@ source "$(dirname "$0")/scripts/lib.sh"
 if [ -d "$OUTPUT" ]; then
   (cd "$OUTPUT" && docker compose -p "$PROJECT" down 2>/dev/null) || true
 fi
+expose_rule del
 echo "net-$NET stopped"

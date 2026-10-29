@@ -51,3 +51,17 @@ tip_of() {
     --socket-path "$SOCKET" --testnet-magic "$MAGIC" 2>&1 | tr -d ' \n'
   echo
 }
+
+# EXPOSE=1: let nodes on OTHER machines join through pool 1 (host port 3001, 3002, ...).
+# Docker forwards their packets into the SEED network, but the pool answers through its SEED
+# router, which cannot reach the outside, so the reply would be lost. Rewriting the source
+# address of those packets makes the pool answer through the docker bridge instead.
+#   expose_rule add | del      (needs sudo; "del" never asks for a password)
+expose_rule() {
+  local rule=(POSTROUTING -p tcp -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE)
+  if [ "$1" = add ]; then
+    sudo iptables -t nat -C "${rule[@]}" 2>/dev/null || sudo iptables -t nat -A "${rule[@]}"
+  else
+    while sudo -n iptables -t nat -D "${rule[@]}" 2>/dev/null; do :; done
+  fi
+}

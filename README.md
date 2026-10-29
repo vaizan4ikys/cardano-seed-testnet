@@ -27,13 +27,14 @@ The Internet map is at `http://<machine-ip>:8080/`.
 
 A second, independent network (magic 43) runs next to the first: `NET=2 ./run.sh`,
 `NET=2 ./stop.sh`. Every script accepts the same `NET=` prefix.
+`EXPOSE=1 ./run.sh` also makes pool 1 reachable from other machines (see `experiments/join-node`).
 
 ## Where to look
 
 | Folder | Content |
 |---|---|
 | [`scripts/`](scripts/) | check the chain, send transactions and messages, leadership, partition test |
-| [`experiments/`](experiments/) | extra nodes joining a running network |
+| [`experiments/`](experiments/) | extra nodes joining a running network, on the same or on another machine |
 | [`spec/`](spec/) | chain parameters (slot length, epoch, k, f) |
 | [`image/`](image/) | the docker image |
 | [`docs/`](docs/troubleshooting.md) | known problems and fixes |

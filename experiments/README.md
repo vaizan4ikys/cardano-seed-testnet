@@ -2,4 +2,4 @@
 
 | Folder | Experiment |
 |---|---|
-| [`joiner/`](joiner/) | one extra node (a plain container) joins a running network and syncs its chain |
+| [`join-node/`](join-node/) | one extra node joins a running network, on the same machine or on another one |

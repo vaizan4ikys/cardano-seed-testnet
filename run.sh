@@ -5,6 +5,7 @@
 #
 #   ./run.sh          network 1 (magic 42)
 #   NET=2 ./run.sh    network 2 (magic 43), can run next to network 1
+#   EXPOSE=1 ./run.sh pool 1 also reachable from other machines on port 3001 (3002 for net 2)
 #
 # Check it with ./scripts/check.sh, stop it with ./stop.sh.
 set -euo pipefail
@@ -23,4 +24,8 @@ rm -rf "$SENT"   # messages sent to the old chain: their txids do not exist on t
 python3 "$ROOT/cardano.py"
 
 (cd "$OUTPUT" && docker compose -p "$PROJECT" up -d)
+if [ "${EXPOSE:-}" = 1 ]; then
+  expose_rule add
+  echo "pool 1 is reachable from other machines on port $((3000 + NET))"
+fi
 echo "net-$NET started. Check it with: NET=$NET ./scripts/check.sh"

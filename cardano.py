@@ -10,6 +10,8 @@ Normally started through ./run.sh. Settings come from environment variables:
 
     NET=1|2|...   which network to build (default 1)
     ARCH=arm|amd  CPU architecture of the containers (default: this machine's)
+    EXPOSE=1      publish pool 1's port on the host machine, so that nodes on
+                  OTHER machines can join (host port 3001 for net 1, 3002 for net 2)
 
 Every network gets its own AS, IX and transit numbers, so several of them can
 run on one machine without colliding:
@@ -28,6 +30,8 @@ NET = int(os.environ.get('NET', '1'))
 ARCH = os.environ.get('ARCH', 'arm' if host.machine() in ('aarch64', 'arm64') else 'amd')
 
 PORT = 3001                                   # Cardano node-to-node port
+EXPOSE = os.environ.get('EXPOSE') == '1'
+HOST_PORT = PORT + NET - 1                    # port on the host when EXPOSE=1: 3001, 3002, ...
 IMAGE_NAME = 'seedemu-cardano:local'
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BUILD = os.path.join(ROOT, 'build', 'net-{}'.format(NET))
@@ -141,6 +145,9 @@ for i, node in enumerate(pools):
     node.addSharedFolder('/cardano', TESTNET)
     node.appendStartCommand(pool_command(n), fork=True)
 
+if EXPOSE:
+    pools[0].addPort(HOST_PORT, PORT)
+
 docker = Docker(internetMapEnabled=WITH_MAP, platform={'arm': Platform.ARM64, 'amd': Platform.AMD64}[ARCH])
 docker.addImage(DockerImage(name=IMAGE_NAME, software=[]), priority=100)
 for node in pools:
@@ -149,3 +156,5 @@ for node in pools:
 os.makedirs(BUILD, exist_ok=True)   # SEED creates only the last folder of the path
 emu.compile(docker, OUTPUT, override=True)
 print('net-{}: pool IPs {}'.format(NET, pool_ips))
+if EXPOSE:
+    print('pool 1 is published on host port {}'.format(HOST_PORT))
