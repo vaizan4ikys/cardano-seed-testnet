@@ -51,6 +51,15 @@ docker bridge. `./stop.sh` removes it again.
 `fetch-chain-files.sh` uses SSH to A; if B has no key for A, log in to B with `ssh -A` to borrow the
 key of your own machine.
 
+**A chain of nodes.** A joiner can serve further nodes. Start it with `LISTEN=1` (it publishes its
+port 3001 on that machine) and let the next machine dial it instead of the pool:
+
+```bash
+# on B:  LISTEN=1 ./experiments/join-node/join.sh remote <A-ip>
+# on C:  ./experiments/join-node/fetch-chain-files.sh seed@<A-ip>       # the files still come from A
+#        ./experiments/join-node/join.sh remote <B-ip>                  # C syncs through B
+```
+
 Requirements for remote mode:
 * B reaches A on TCP port 3001 (`nc -zv <A-ip> 3001`), no firewall in the way
 * the same `cardano-node` version on both (the same image; build it from `image/` or copy it with

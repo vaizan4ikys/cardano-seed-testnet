@@ -6,6 +6,8 @@
 #   ./join.sh local 2              the same for network 2
 #   ./join.sh remote <host-ip>     another machine: dial <host-ip>:3001 over the real network
 #   ./join.sh remote <host-ip> 3002   other port (network 2 is published on 3002)
+#   LISTEN=1 ./join.sh remote ...  also publish this node's port 3001 on the machine, so that
+#                                  a further node can join through it (a chain of nodes)
 #   ./join.sh stop                 remove the container
 #
 # local   the node gets the address .99 in the docker network of pool 1's AS and carries the SEED
@@ -49,6 +51,7 @@ else
   PEER=${2:?usage: $0 remote <host-ip> [port]}
   PORT=${3:-3001}
   [ -f "$FILES/config.json" ] || { echo "no chain files: run ./fetch-chain-files.sh <user@host> first"; exit 1; }
+  [ "${LISTEN:-}" = 1 ] && RUN_OPTIONS=(-p 3001:3001)
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "image $IMAGE not found"; exit 1; }
 
@@ -67,3 +70,5 @@ docker run -d --name "$NAME" "${RUN_OPTIONS[@]}" -v "$FILES:/chain:ro" --entrypo
   'mkdir -p /db && exec cardano-node run --config /chain/config.json --topology /chain/topology.json --database-path /db --socket-path /node.socket --host-addr 0.0.0.0 --port 3001' >/dev/null
 MAGIC=$(grep -o '"networkMagic": *[0-9]*' "$FILES/shelley-genesis.json" | grep -o '[0-9]*$')
 echo "started $NAME ($MODE), dialling $PEER:$PORT, magic $MAGIC; see ./check.sh"
+[ "${LISTEN:-}" = 1 ] && echo "other nodes can join through this machine, port 3001"
+true
