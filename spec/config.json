@@ -1,0 +1,31 @@
+{
+  "Protocol": "Cardano",
+  "RequiresNetworkMagic": "RequiresMagic",
+  "ByronGenesisFile": "byron-genesis.json",
+  "ShelleyGenesisFile": "shelley-genesis.json",
+  "AlonzoGenesisFile": "alonzo-genesis.json",
+  "ConwayGenesisFile": "conway-genesis.json",
+  "DijkstraGenesisFile": "dijkstra-genesis.json",
+  "LastKnownBlockVersion-Major": 3,
+  "LastKnownBlockVersion-Minor": 1,
+  "LastKnownBlockVersion-Alt": 0,
+  "TestShelleyHardForkAtEpoch": 0,
+  "TestAllegraHardForkAtEpoch": 0,
+  "TestMaryHardForkAtEpoch": 0,
+  "TestAlonzoHardForkAtEpoch": 0,
+  "TestBabbageHardForkAtEpoch": 0,
+  "TestConwayHardForkAtEpoch": 0,
+  "PeerSharing": false,
+  "UseTraceDispatcher": true,
+  "TraceOptions": {
+    "": {
+      "severity": "Notice",
+      "backends": [
+        "Stdout HumanFormatUncoloured"
+      ]
+    },
+    "Forge": {
+      "severity": "Info"
+    }
+  }
+}
