@@ -6,6 +6,7 @@
 | [`measure/`](measure/) | join time, transaction latency and block propagation under added delay and loss; checkpoints on a growing chain |
 | [`load/`](load/) | keep the blocks of the chain full of transactions |
 | [`saturation/`](saturation/) | how many sensor readings per second the chain takes, and the waiting time near that limit (batch size and rate sweep) |
+| [`gateways/`](gateways/) | many gateways with their own nodes and funded wallets submit at the same time: capacity and waiting time from the sites (not tested yet) |
 | [`outsider/`](outsider/) | a rogue node with another genesis and magic dials a pool: who rejects it, how fast, and does the real chain notice |
 
 ## Results

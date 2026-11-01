@@ -23,7 +23,8 @@ LANES=${LANES:-4}                # independent chains
 DRAIN=${DRAIN:-300}              # seconds to wait for the rest after the last submit
 GIVEUP=${GIVEUP:-60}             # a transaction that cannot be submitted for this long ends its lane
 DRY_RUN=${DRY_RUN:-}
-KEY=/cardano/utxo-keys/utxo2/utxo
+# START_AT (epoch seconds): start submitting at this time (several nodes at once); KEY: key files without the extension
+KEY=${KEY:-/cardano/utxo-keys/utxo2/utxo}      # the key whose address pays (a gateway test uses the gateway's own: ../../gateways)
 export CARDANO_NODE_SOCKET_PATH=/node.socket
 
 # its own folder: the load and the other measurements use /tmp too
@@ -78,7 +79,7 @@ if [ "$DRY_RUN" = 1 ]; then echo "dry run: nothing submitted"; echo "size_bytes=
 
 # --- the step
 : > submits.txt; : > rejects.log; : > samples.txt; : > mempool.txt
-T0=$(awk -v t="$(now)" 'BEGIN { printf "%.3f", t + 2 }')       # a moment for the workers to start
+T0=${START_AT:-$(awk -v t="$(now)" 'BEGIN { printf "%.3f", t + 2 }')}   # a moment for the workers to start; START_AT: the same start time for several nodes
 
 sampler() {
   local round=0
