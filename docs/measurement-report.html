@@ -111,7 +111,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
 
 <nav class="toc" aria-label="Sections">
   <a href="#summary">Summary</a><a href="#setup">Setup</a><a href="#join">1 · Joining</a><a href="#prop">2 · Block travel</a><a href="#hops">3 · Hops</a><a href="#tx">4 · Transactions</a>
-  <a href="#forks">5 · Forks</a><a href="#sat">6 · Capacity</a><a href="#links">7 · Real links</a><a href="#resil">8 · Failures</a><a href="#scale">9 · Scale</a><a href="#outsider">10 · Outsiders</a><a href="#trust">Trust</a><a href="#hyp">Unproven</a><a href="#next">Next</a>
+  <a href="#forks">5 · Forks</a><a href="#sat">6 · Capacity</a><a href="#links">7 · Real links</a><a href="#resil">8 · Failures</a><a href="#scale">9 · Scale</a><a href="#machines">10 · Machines</a><a href="#outsider">11 · Outsiders</a><a href="#trust">Trust</a><a href="#hyp">Unproven</a><a href="#next">Next</a>
 </nav>
 
 <section id="summary">
@@ -127,8 +127,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>How much data does a site transfer?</td><td>About 1 GB per day at full capacity, about 0.03 GB per day when idle.</td><td class="n">9</td></tr>
       <tr><td>What if a pool or a node fails?</td><td>The chain keeps running with one or two of three pools stopped, and the pools agree again about 1 to 2 minutes after a short cut. A pool isolated for 15 minutes cannot rejoin by itself; wiping its database and restarting fixes it in under a minute.</td><td class="n">8</td></tr>
       <tr><td>How many nodes can one pool serve?</td><td>At least 12 with the same CPU load (about 3%); block arrival gets 11 ms slower.</td><td class="n">9</td></tr>
+      <tr><td>What do the machines need?</td><td>Little: a pool node uses about 145 MB and a few percent of a core, a following node about 200 MB. A joining node uses up to 1.3 of 2 cores for the time it syncs. A 2 GB VM with 2 CPUs is enough.</td><td class="n">10</td></tr>
       <tr><td>What if a site's clock is wrong?</td><td>A clock 2 s or more behind makes the node drop its connection again and again (up to 13 times in 2 minutes), and it is up to date only 50 to 95% of the time. A clock that is ahead is harmless.</td><td class="n">9</td></tr>
-      <tr><td>What can an outsider do?</td><td>A node with another magic number is refused in 20 ms. With the same magic and another genesis it connects, but its chain is rejected at the first block. No effect on the real chain was seen.</td><td class="n">10</td></tr>
+      <tr><td>What can an outsider do?</td><td>A node with another magic number is refused in 20 ms. With the same magic and another genesis it connects, but its chain is rejected at the first block. No effect on the real chain was seen.</td><td class="n">11</td></tr>
     </tbody></table></div>
   <h3>What we would do with it</h3>
   <p>These are our recommendations, drawn from the numbers. They are judgements, not measurements.</p>
@@ -174,6 +175,16 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>Dead after standing still</td><td class="n">15 min</td><td class="n">36 h</td><td>3k/f: the chain cannot recover after that</td></tr>
     </tbody></table></div>
 
+  <h3>The four cases of the plan</h3>
+  <p>The plan has four cases. They grow from one machine to several, and the last one is the main performance measurement: how the machines that host the network cope.</p>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Case</th><th>What we did</th><th>Where in this report</th></tr></thead>
+    <tbody>
+      <tr><td>1 · One network plus one extra node joining</td><td>A new node with an empty database joins the running network and syncs. We timed it with an explicit start and end. The node ran on another VM; a join on the same machine was not timed separately.</td><td>1, 7</td></tr>
+      <tr><td>2 · Two VMs: the blockchain in one, the nodes in the other</td><td>The three pools and the load run on seedvm; the joining nodes run on seedvm2 and the other VMs. This is the setup of most measurements.</td><td>1, 2, 4, 5, 6, 7, 8</td></tr>
+      <tr><td>3 · One chain spread over several VMs</td><td>Nodes of the same chain on three VMs, up to 6 nodes in a row. The three block-producing pools stayed together on one VM, so a chain with pools on different VMs was not tested.</td><td>3, 9</td></tr>
+      <tr><td>4 · Four VMs, to check the hops</td><td>Pool VM plus three joiner VMs, nodes chained one behind the other (up to 6 nodes with two per VM). Block arrival, join time and transaction time per hop, and the load of every machine.</td><td>3, 10</td></tr>
+    </tbody></table></div>
   <h3>Conditions of each experiment</h3>
   <div class="card-table scroll"><table>
     <thead><tr><th>Section</th><th>Chain</th><th>Load</th><th>Runs</th></tr></thead>
@@ -188,7 +199,8 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>7 · Real links</td><td>testnet, about 10,700 blocks</td><td>off</td><td>1 to 2 joins per profile</td></tr>
       <tr><td>8 · Finality, outages, failures</td><td>testnet</td><td>on</td><td>12 transactions; 1 to 5 outages per setting; 1 failure run</td></tr>
       <tr><td>9 · Traffic, many nodes, clocks</td><td>testnet</td><td>traffic: off and on; others: on, off</td><td>1 window; 1 run; 3 runs per offset</td></tr>
-      <tr><td>10 · Outsiders</td><td>testnet</td><td>off</td><td>1 run per case</td></tr>
+      <tr><td>10 · Machines</td><td>testnet</td><td>on</td><td>CPU and memory once a minute in 4 runs</td></tr>
+      <tr><td>11 · Outsiders</td><td>testnet</td><td>off</td><td>1 run per case</td></tr>
     </tbody></table></div>
 </section>
 <section id="words">
@@ -476,8 +488,30 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <span class="trust warn">▲ Rough · the traffic and many-nodes numbers are solid; the clock results come from three runs per offset and vary between runs</span>
   <div class="takeaway">A pool serves a dozen nodes without trouble. A sensor node with a clock that runs behind by more than 2 seconds is unreliable, so every site needs working time synchronisation.</div>
 </section>
+<section id="machines">
+  <h2>10 · How did the machines cope?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How much CPU, memory and disk do the machines that host the nodes use, and did they limit our results?</dd>
+    <dt>Why</dt><dd>This is the point of the four-VM case: what a site needs to host a node, and whether the VMs on one Mac distorted the measurements.</dd>
+    <dt>Method</dt><dd>A sampler read the CPU use and memory of the <code>cardano-node</code> processes and the free memory of every VM once a minute during four runs (growth, the large-chain matrix, the fork test and the outsider test). CPU is in percent of one core, so 100% is one core and a VM with 2 CPUs can show up to 200%. We also looked at the Mac a few times with its own tools.</dd>
+  </dl>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Machine</th><th>Runs on it</th><th class="n">CPU mean</th><th class="n">CPU peak</th><th class="n">Node memory</th><th class="n">Free memory (lowest)</th></tr></thead>
+    <tbody>
+      <tr><td>seedvm, 4 GB, 2 CPU</td><td>3 pools, load</td><td class="n">2.5 to 5.8%</td><td class="n">37%</td><td class="n">about 145 MB per pool (400 to 445 MB for three, at most 497)</td><td class="n">2.7 GB of 3.9 GB</td></tr>
+      <tr><td>seedvm2, 3, 4, 2 GB, 2 CPU</td><td>1 joining node</td><td class="n">0.5 to 15%</td><td class="n"><b>130%</b></td><td class="n">at most 222 MB</td><td class="n">1.4 GB of 2 GB</td></tr>
+      <tr><td>seedvm with 1 to 12 nodes on pool 1</td><td>pool 1 (fan-out test)</td><td class="n">3.3 to 3.6%</td><td class="n">not sampled</td><td class="n">not sampled</td><td class="n">not sampled</td></tr>
+    </tbody></table></div>
+  <p>In steady state a node is light: a pool node uses about 145 MB and a few percent of one core, and a following node about 200 MB. The one heavy moment is the sync of a new node. The joining node used up to 1.3 cores of its 2 for the seconds or minutes it needed, which is the only place where a VM came close to its limit. That fits the copy speed that levelled off near 20 MB/s in section 1, but we did not test whether the CPU is what limits it.</p>
+  <p>Disk: seedvm used 27 of its 96 GB after about 12,000 blocks. A joining node's database was about 1.2 GB at 10,700 blocks, twice the 625 MB it received, because it also builds its own ledger state. At full load the chain grows about 1 GB per day.</p>
+  <p>The Mac: in the spot checks the VMware processes held 0.15 to 1.4 GB of memory each (1.4 GB for the pool VM). About 47% of the Mac's memory was free, swap use was 157 MB of 1 GB, there was no thermal or performance warning, and the load average was about 1. We did not record the Mac's CPU during the runs, so how much the VMs competed for it is known only from one case: a fibre join took 97 s instead of 47 s while other work ran on the Mac.</p>
+  <div class="example"><b>Example</b>A small gateway VM with 2 CPUs and 2 GB can host a node. It uses about 200 MB of memory and a few percent of a core, and up to 1.3 cores for the minute it needs to join.</div>
+  <span class="trust warn">▲ Rough · VM-level samples once a minute in four runs; the Mac's own CPU was not recorded during the runs</span>
+  <div class="takeaway">Hosting a node is cheap. A 2 GB VM with 2 CPUs is enough, and the CPU only matters during a join. The pools never came near the limits of their VM.</div>
+</section>
+
 <section id="outsider">
-  <h2>10 · What does an outsider network do to ours?</h2>
+  <h2>11 · What does an outsider network do to ours?</h2>
   <dl class="qa">
     <dt>Question</dt><dd>If a node from a different Cardano network connects to one of our pools, who refuses it, how fast, and does the real chain notice?</dd>
     <dt>Why</dt><dd>A sensor system needs to know whether a foreign or hostile node can disturb it. Two things can differ between networks: the genesis (the start of the chain) and the magic number.</dd>
@@ -517,7 +551,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <div class="glossary">
     <div><b>Why a full block costs 3 times the delay.</b> A 60 KB block needs several TCP round trips (slow start). We did not test it apart from the block size.</div>
     <div><b>Why block arrival depends on block size, not on block rhythm.</b> The mainnet-like chain, with nearly empty blocks, behaved like the testnet with empty blocks. Block size was never changed alone.</div>
-    <div><b>Why joins stop speeding up near 20 MB/s.</b> We suspect the VM's CPU or disk. Not tested.</div>
+    <div><b>Why joins stop speeding up near 20 MB/s.</b> The joining node used up to 1.3 of its 2 cores, so the CPU is the likely limit. Not tested.</div>
     <div><b>Why hop 2 did not finish with 100 ms and 1% loss.</b> We expect TCP to slow down on a lossy link that carries bulk data. Not tested apart.</div>
     <div><b>Why catch-up after an outage varies from 13 s to 143 s.</b> We think it is the node's own pause before it reconnects. Not confirmed in the logs.</div>
     <div><b>Why a full waiting room does not lose transactions.</b> The submit command seems to wait. We inferred it from the results.</div>
