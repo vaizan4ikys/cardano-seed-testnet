@@ -307,7 +307,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How long does a transaction take to reach the pool's waiting room, and how long until it is in a block?</dd>
     <dt>Why</dt><dd>This is the delay between a sensor reading and the moment it is stored.</dd>
-    <dt>Method</dt><dd>A node submits one metadata transaction. We time (a) the moment the pool's mempool holds it and (b) the moment the node sees it in a block. Six to ten transactions per setting.</dd>
+    <dt>Method</dt><dd>A node submits one metadata transaction. We time (a) the moment the pool's mempool holds it and (b) the moment the node sees it in a block. Six to ten transactions per setting. The transaction is built and signed on the pool machine, because the funded key is there, and only submitted at the node on the VM. So the building and signing time, and the link from a sensor to its node, are not in these times.</dd>
   </dl>
   <figure>
     <figcaption class="t">Time until the pool's mempool holds the transaction</figcaption>
@@ -567,6 +567,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
     <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
     <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
+    <div><b>Many gateways with their own wallets</b> Several gateway nodes on different VMs, each with its own key and funds, submit transactions at the same time. This measures capacity and waiting time for the realistic case, and shows what it takes to fund each gateway. The capacity test in section 6 submitted from one place only.</div>
     <div><b>Fee per reading</b> The transaction fee for each batch size, as a cost per reading. It is a calculation from the fee parameters.</div>
     <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
   </div>
