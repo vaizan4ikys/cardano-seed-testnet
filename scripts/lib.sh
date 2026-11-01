@@ -58,10 +58,13 @@ tip_of() {
 # address of those packets makes the pool answer through the docker bridge instead.
 #   expose_rule add | del      (needs sudo; "del" never asks for a password)
 expose_rule() {
-  local rule=(POSTROUTING -p tcp -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE)
+  # only for machines outside the emulation (10.0.0.0/8 is SEED's address space): the pools' own traffic to
+  # pool 1 must not be rewritten, or after a while its connections can break (stale conntrack entries)
+  local rule=(POSTROUTING -p tcp ! -s 10.0.0.0/8 -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE)
   if [ "$1" = add ]; then
     sudo iptables -t nat -C "${rule[@]}" 2>/dev/null || sudo iptables -t nat -A "${rule[@]}"
   else
     while sudo -n iptables -t nat -D "${rule[@]}" 2>/dev/null; do :; done
+    while sudo -n iptables -t nat -D POSTROUTING -p tcp -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE 2>/dev/null; do :; done
   fi
 }

@@ -7,7 +7,9 @@
 #   ./join.sh remote <host-ip>     another machine: dial <host-ip>:3001 over the real network
 #   ./join.sh remote <host-ip> 3002   other port (network 2 is published on 3002)
 #   LISTEN=1 ./join.sh remote ...  also publish this node's port 3001 on the machine, so that
-#                                  a further node can join through it (a chain of nodes)
+#                                  a further node can join through it (a chain of nodes);
+#                                  HOST_PORT=3002 publishes it on another port of the machine
+#   NAME=hop4 ./join.sh ...        a second node on the same machine (default name: cardano-joiner)
 #   ./join.sh stop                 remove the container
 #
 # local   the node gets the address .99 in the docker network of pool 1's AS and carries the SEED
@@ -16,7 +18,7 @@
 # remote  needs the chain files from ./fetch-chain-files.sh and, on the host, EXPOSE=1 ./run.sh.
 set -euo pipefail
 
-NAME=cardano-joiner
+NAME=${NAME:-cardano-joiner}       # several nodes on one machine: NAME=hop4 HOST_PORT=3002 (see measure/hops.sh)
 MODE=${1:-}
 
 case $MODE in
@@ -51,7 +53,11 @@ else
   PEER=${2:?usage: $0 remote <host-ip> [port]}
   PORT=${3:-3001}
   [ -f "$FILES/config.json" ] || { echo "no chain files: run ./fetch-chain-files.sh <user@host> first"; exit 1; }
-  [ "${LISTEN:-}" = 1 ] && RUN_OPTIONS=(-p 3001:3001)
+  [ "${LISTEN:-}" = 1 ] && RUN_OPTIONS=(-p "${HOST_PORT:-3001}:3001")
+  if [ "$NAME" != cardano-joiner ]; then   # an extra node on this machine: its own topology file
+    SRC=$FILES; FILES=$ROOT/build/joiner-$NAME; mkdir -p "$FILES"
+    cp "$SRC"/config.json "$SRC"/*-genesis.json "$FILES/"
+  fi
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "image $IMAGE not found"; exit 1; }
 

@@ -28,6 +28,14 @@ cardano-cli conway transaction build --testnet-magic "$MAGIC" "${INPUTS[@]}" \
 cardano-cli conway transaction sign --tx-body-file tx.raw --signing-key-file $KEY.skey --out-file tx.signed
 TXID=$(cardano-cli conway transaction txid --tx-file tx.signed | grep -o '[0-9a-f]\{64\}')
 
+# BUILD_ONLY=1: print the signed transaction instead of submitting it, so that another node can
+# submit it (experiments/measure/tx-latency.sh)
+if [ "${BUILD_ONLY:-}" = 1 ]; then
+  echo "txid: $TXID"
+  cat tx.signed
+  exit 0
+fi
+
 START=$(date +%s.%N)
 cardano-cli conway transaction submit --tx-file tx.signed --testnet-magic "$MAGIC"
 echo "txid: $TXID"

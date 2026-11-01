@@ -19,3 +19,17 @@ Main parameters in `shelley-spec.json`:
 | `maxTxSize` | 16384 | transaction limit, 16 KB |
 
 The network magic in the spec is replaced by `--testnet-magic` (42 for network 1, 43 for network 2).
+
+## Mainnet-like parameters
+
+`PARAMS=mainnet ./run.sh` makes a copy of the spec with the block rhythm of Cardano mainnet:
+
+| Parameter | `spec/` (default) | `PARAMS=mainnet` |
+|---|---|---|
+| `activeSlotsCoeff` (f) | 0.2 | 0.05 (one block per 20 s) |
+| `securityParam` (k) | 60 | 2160 |
+| `epochLength` | 3000 slots | 432000 slots (5 days) |
+| `maxBlockBodySize` | 65536 | 90112 |
+
+A chain that stands still for more than 3k/f (36 h instead of 15 min) is dead, so a stopped Mac does not
+end the network. With 20 s blocks every measurement takes about four times as long.
