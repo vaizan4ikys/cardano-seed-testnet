@@ -5,5 +5,10 @@
 **/results/*/.*
 **/results/smoke*/
 **/results/aborted-*/
+# stdout of the drivers, completion markers and the queue scripts that launched the runs: not needed
+**/results/*.log
+**/results/*.out
+**/results/*.done
+**/results/*-queue.sh
 # the rogue-node and pool logs of the outsider runs are small and are the evidence: keep them
 !**/outsider/results/*/*.log

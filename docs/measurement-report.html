@@ -527,19 +527,17 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
 </section>
 
 <section id="next">
-  <h2>What is still to measure</h2>
-  <p>Done since the first version of this report: more hops, finality, catch-up, failures, traffic, many nodes and clock skew (sections 3, 8 and 9). Open, in order of value for CyberTel:</p>
+  <h2>What is still open</h2>
+  <p>Ideas for the next round, in order of value for CyberTel:</p>
   <div class="glossary">
     <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
     <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
     <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
     <div><b>Fee per reading</b> The transaction fee for each batch size, as a cost per reading. It is a calculation from the fee parameters.</div>
     <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
-    <div><b>Dropped: fairness</b> Whether each pool forges blocks in proportion to its stake. The protocol does this by design, and equal stakes gave similar counts in the fork test (78, 83 and 88 blocks in 20 minutes).</div>
-    <div><b>Dropped: mainnet-like chain at full size</b> Filling it to hundreds of megabytes would take about a day. The join formula in section 1 covers large chains.</div>
   </div>
   <footer>
-    <p>Results and scripts are in the repository under <code>experiments/measure</code>, <code>experiments/saturation</code> and <code>experiments/outsider</code>. Nothing has been committed or pushed yet. Run folders: growth-20261030, forks-night1, saturation-night1, matrix-big-20261030-0407, matrix-200ms-20261030-0605, asymmetric-20261030-0407, profiles-20261030-0707, outsider-20261030-0819, the mainnet-20261030-0915 matrix, saturation and forks, and, from the second round, hops-main, finality-main, outage-main with its repeats, traffic-main, failures-main, fanout-main and skew-main2.</p>
+    <p>Scripts and the summary files of every run are in the repository <code>vaizan4ikys/cardano-seed-testnet</code>, under <code>experiments/measure</code>, <code>experiments/saturation</code> and <code>experiments/outsider</code>; this report is <code>docs/measurement-report.html</code>. The raw node logs of the runs are not published.</p>
   </footer>
 </section>
 </div>
