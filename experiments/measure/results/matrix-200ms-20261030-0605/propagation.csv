@@ -1,0 +1,6 @@
+delay_ms,loss_pct,node,blocks,median_ms,p95_ms,max_ms
+200,0,pool1,33,6,12,17
+200,0,pool2,30,4,12,21
+200,0,pool3,36,4,13,18
+200,0,seedvm2,52,608,622,634
+200,0,seedvm4,49,2013,2033,2065

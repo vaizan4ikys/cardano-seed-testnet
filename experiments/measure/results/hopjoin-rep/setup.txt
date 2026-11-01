@@ -1,0 +1,3 @@
+date: 2026-11-01T09:54:17Z    hops: 6    delays: 0 50 100    idle: 420 s
+chain at start: {"block":10693,"epoch":18,"era":"Conway","hash":"8a2449cd4d6e05f35c5faa2c9f73c7c56258f21afbc6db4a21738e4f79274967","slot":54629,"slotInEpoch":629,"slotsToEpochEnd":2371,"syncProgress":"100.00"}
+load: not running

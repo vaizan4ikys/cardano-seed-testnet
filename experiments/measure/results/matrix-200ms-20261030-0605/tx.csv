@@ -1,0 +1,13 @@
+delay_ms,loss_pct,node,hops,seconds,mempool_seconds
+200,0,seedvm2,1,4.39,0.42
+200,0,seedvm4,2,13.03,1.03
+200,0,seedvm2,1,8.62,0.42
+200,0,seedvm4,2,9.10,1.03
+200,0,seedvm2,1,12.79,0.44
+200,0,seedvm4,2,24.83,1.02
+200,0,seedvm2,1,2.29,0.44
+200,0,seedvm4,2,7.02,1.04
+200,0,seedvm2,1,9.75,0.45
+200,0,seedvm4,2,20.51,1.04
+200,0,seedvm2,1,10.72,0.45
+200,0,seedvm4,2,6.45,1.06

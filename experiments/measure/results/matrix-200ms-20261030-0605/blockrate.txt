@@ -1,0 +1,2 @@
+# 57 blocks in 222 s = 15.1 blocks/min
+delay 200 ms, loss 0 %: # 57 blocks in 222 s = 15.1 blocks/min

@@ -1,0 +1,14 @@
+date: 2026-10-31T19:52:48Z    outages: 60 60 60 60 60    nodes: seedvm2
+chain at start: {"block":827,"epoch":1,"era":"Conway","hash":"d93ff694b98beaf77f25aed68fdc69384ac9fd36915fe3f626c13af74695d5f1","slot":4134,"slotInEpoch":1134,"slotsToEpochEnd":1866,"syncProgress":"100.00"}
+load: running
+== seedvm2 (hop 1): cut off for 60 s
+  60 62 27.0 1.0
+== seedvm2 (hop 1): cut off for 60 s
+  60 60 32.6 0.9
+== seedvm2 (hop 1): cut off for 60 s
+  60 60 29.0 1.0
+== seedvm2 (hop 1): cut off for 60 s
+  60 77 28.4 1.7
+== seedvm2 (hop 1): cut off for 60 s
+  60 63 29.0 1.2
+done: /Users/pavloharabadzhiiev/cardano-seed-testnet/experiments/measure/results/outage-rep60

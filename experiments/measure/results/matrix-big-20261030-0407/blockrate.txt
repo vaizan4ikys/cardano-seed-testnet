@@ -1,0 +1,6 @@
+# 626 blocks in 2877 s = 13.0 blocks/min
+delay 0 ms, loss 0 %: # 626 blocks in 2877 s = 13.0 blocks/min
+# 638 blocks in 2871 s = 13.3 blocks/min
+delay 0 ms, loss 1 %: # 638 blocks in 2871 s = 13.3 blocks/min
+# 644 blocks in 2893 s = 13.3 blocks/min
+delay 100 ms, loss 0 %: # 644 blocks in 2893 s = 13.3 blocks/min

@@ -1,0 +1,7 @@
+scenario,node,window_s,blocks,rx_mb,tx_mb,rx_mb_per_hour,tx_mb_per_hour,rx_gb_per_day,tx_gb_per_day
+idle,pool1,601,117,0.5,0.6,3.0,3.9,0.07,0.09
+idle,hop1,601,117,0.3,0.3,1.8,1.8,0.04,0.04
+idle,hop2,601,117,0.2,0.1,1.5,0.3,0.03,0.01
+full,pool1,601,118,6.3,25.9,37.7,155.4,0.88,3.64
+full,hop1,601,118,7.6,7.6,45.2,45.3,1.06,1.06
+full,hop2,601,118,7.5,0.1,44.7,0.5,1.05,0.01

@@ -1,0 +1,4 @@
+node,hops,outage_s,slots_behind,catchup_s,received_mb
+seedvm2,1,300,306,26.6,4.2
+seedvm2,1,300,303,12.9,3.4
+seedvm2,1,300,301,136.1,4.9

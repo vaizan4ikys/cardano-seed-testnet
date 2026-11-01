@@ -1,0 +1,52 @@
+JOIN TIME, seconds (median of reps; start-up part ~0.5 s)   single mode
+ delay  loss |  seedvm2 (hop1)  seedvm4 (hop2)
+    0ms    0% |             1.0             1.0   (n=3)
+    0ms    1% |             1.1             1.1   (n=3)
+   50ms    0% |             2.4             2.1   (n=3)
+   50ms    1% |             2.4             2.3   (n=3)
+  100ms    0% |             2.9             3.5   (n=3)
+  100ms    1% |             3.0             7.7   (n=3)
+  200ms    0% |             4.6             6.4   (n=3)
+  200ms    1% |             4.6             8.4   (n=3)
+  500ms    0% |             9.6            16.4   (n=3)
+  500ms    1% |            10.3            26.3   (n=3)
+parallel (0 ms): seedvm2 1.0 s, seedvm3 1.0 s;  alone: seedvm2 1.0 s
+
+TRANSACTION LATENCY, seconds: median / p90   (n per cell)
+ delay  loss |       seedvm2 (hop1)       seedvm4 (hop2)
+    0ms    0% |    3.2 / 9.2  (n=10)   3.3 / 13.3  (n=10)
+    0ms    1% |    3.7 / 9.3  (n=10)    2.3 / 8.3  (n=10)
+   50ms    0% |    3.7 / 7.2  (n=10)    2.4 / 4.4  (n=10)
+   50ms    1% |    3.6 / 9.4  (n=10)    4.9 / 7.5  (n=10)
+  100ms    0% |    4.5 / 8.0  (n=10)    3.6 / 5.6  (n=10)
+  100ms    1% |    3.0 / 6.0  (n=10)    2.6 / 4.6  (n=10)
+  200ms    0% |    2.2 / 7.5  (n=10)   4.9 / 10.9  (n=10)
+  200ms    1% |   6.7 / 10.7  (n=10)    3.9 / 7.9  (n=10)
+  500ms    0% |   4.2 / 12.7  (n=10)    6.9 / 8.0  (n=10)
+  500ms    1% |    3.7 / 8.6  (n=10)   7.0 / 11.0  (n=10)
+all transactions: median 4.1 s, mean 5.1 s, p90 9.7 s, max 26.3 s (n=200)
+
+BLOCK PROPAGATION, ms behind the forging pool: median / p95   (blocks)
+ delay  loss |          pool2         seedvm2 (hop1)         seedvm4 (hop2)
+    0ms    0% |   5 / 15  (33)           9 / 24  (45)          18 / 30  (45)
+    0ms    1% |   7 / 15  (39)          11 / 26  (56)          16 / 37  (58)
+   50ms    0% |   5 / 12  (34)          59 / 74  (56)        217 / 235  (56)
+   50ms    1% |   4 / 13  (31)          57 / 80  (49)        212 / 337  (49)
+  100ms    0% |   3 / 10  (31)        107 / 125  (46)        412 / 435  (46)
+  100ms    1% |   5 / 13  (31)        107 / 126  (55)        413 / 446  (55)
+  200ms    0% |   5 / 18  (41)        210 / 227  (61)        819 / 843  (61)
+  200ms    1% |   5 / 16  (28)        209 / 224  (50)       811 / 1207  (50)
+  500ms    0% |   7 / 15  (49)        509 / 526  (79)      2021 / 2037  (79)
+  500ms    1% |   6 / 14  (55)        513 / 529  (89)      2027 / 3287  (88)
+
+BLOCK RATE (theory 12/min):
+  delay 0 ms, loss 0 %: # 46 blocks in 258 s = 10.5 blocks/min
+  delay 0 ms, loss 1 %: # 64 blocks in 240 s = 15.8 blocks/min
+  delay 50 ms, loss 0 %: # 60 blocks in 226 s = 15.7 blocks/min
+  delay 50 ms, loss 1 %: # 55 blocks in 231 s = 14.0 blocks/min
+  delay 100 ms, loss 0 %: # 50 blocks in 232 s = 12.7 blocks/min
+  delay 100 ms, loss 1 %: # 59 blocks in 224 s = 15.5 blocks/min
+  delay 200 ms, loss 0 %: # 62 blocks in 244 s = 15.0 blocks/min
+  delay 200 ms, loss 1 %: # 53 blocks in 242 s = 12.9 blocks/min
+  delay 500 ms, loss 0 %: # 85 blocks in 389 s = 13.0 blocks/min
+  delay 500 ms, loss 1 %: # 94 blocks in 363 s = 15.4 blocks/min

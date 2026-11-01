@@ -1,0 +1,6 @@
+[2026-10-30 06:44:57.9330Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 2) ResponderDir terminated cleanly
+[2026-10-30 06:44:57.9340Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 3) ResponderDir terminated cleanly
+[2026-10-30 06:45:57.9297Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 4) ResponderDir terminated cleanly
+[2026-10-30 06:48:04.0716Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 2) ResponderDir terminated cleanly
+[2026-10-30 06:48:04.0728Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 3) ResponderDir terminated cleanly
+[2026-10-30 06:49:04.0707Z][70250ce4e89b:Net.Mux.Remote.CleanExit](Notice,3928075) With mux bearer ConnectionId 10.150.0.71:3001 10.150.0.1:3001. Miniprotocol (MiniProtocolNum 4) ResponderDir terminated cleanly

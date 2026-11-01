@@ -1,0 +1,3 @@
+date: 2026-10-30T08:58:11Z    commit: 6d7b338    steps: 100:0.5 100:1 100:1.5 100:2 300:0.2 300:0.4 300:0.6 300:0.8    duration: 120 s
+chain at start: {"block":114,"epoch":0,"era":"Conway","hash":"cc2bc5a546b7b8a82c9a9cd4648487f49abfe4834145eaf799201445303c4396","slot":2472,"slotInEpoch":2472,"slotsToEpochEnd":429528,"syncProgress":"100.00"}
+pool machine: 2 CPU, 3919 MiB RAM

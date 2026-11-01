@@ -1,0 +1,1 @@
+# 2026-10-30T09:31:24Z: 30 min per delay; pools in one SEED network, delay on each pool's egress

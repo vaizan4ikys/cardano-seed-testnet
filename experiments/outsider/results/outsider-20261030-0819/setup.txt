@@ -1,0 +1,3 @@
+date: 2026-10-30T07:19:11Z    variants: 42 43    base/rogue/after minutes: 5/10/5
+chain at start: {"block":11569,"epoch":19,"era":"Conway","hash":"c1b31b4d2eb8c00ee0e447256c779bae3126cfcfaec02a453ed3e680a913c34f","slot":57444,"slotInEpoch":444,"slotsToEpochEnd":2556,"syncProgress":"100.00"}
+load: not running

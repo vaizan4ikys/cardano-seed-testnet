@@ -1,0 +1,11 @@
+delay_ms,loss_pct,mode,rep,node,hops,seconds,ready_seconds,blocks,sync_seconds,db_kb
+0,0,parallel,1,seedvm2,1,26.2,0.5,9923,25.7,842868
+0,0,parallel,1,seedvm3,1,26.4,0.6,9923,25.8,842868
+0,0,parallel,1,seedvm4,1,26.6,0.5,9923,26.1,842868
+0,0,parallel,2,seedvm2,1,26.7,0.6,9929,26.1,843580
+0,0,parallel,2,seedvm3,1,26.2,0.5,9928,25.7,843460
+0,0,parallel,2,seedvm4,1,26.1,0.6,9928,25.5,843460
+200,0,single,1,seedvm2,1,251.2,0.5,9977,250.7,555292
+200,0,single,1,seedvm4,2,474.2,0.5,10079,473.7,528008
+200,0,single,2,seedvm2,1,260.8,0.5,10134,260.3,574236
+200,0,single,2,seedvm4,2,485.0,0.5,10229,484.5,512424

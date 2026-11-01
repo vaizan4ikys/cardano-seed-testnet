@@ -1,0 +1,1 @@
+date: 2026-11-01T02:40:46Z    counts: 1 4 8 12    window: 300 s

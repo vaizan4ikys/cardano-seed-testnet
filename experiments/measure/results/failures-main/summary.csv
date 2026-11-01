@@ -1,0 +1,7 @@
+scenario,outage_s,blocks_per_min_during,blocks_per_min_before,max_block_gap_at_restore,heal_seconds,healed
+stop1:300,300,10.0,12.0,0,58,yes
+stop2:300,300,3.9,17.0,0,109,yes
+cut3:60,60,4.9,5.0,1,27,yes
+cut3:180,180,11.7,15.0,23,66,yes
+cut3:360,360,8.0,20.0,29,43,yes
+cut3:900,900,7.6,11.8,44,902,no

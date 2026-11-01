@@ -1,0 +1,3 @@
+date: 2026-10-30T06:07:25Z    profiles: fibre:100:100:5:0:2:1 cable:50:10:10:0.1:2:1 mobile4g:20:5:40:0.5:2:0 rural-dsl:5:2:25:0.5:1:0 satellite:25:3:300:0.5:1:0    timeout: 3000 s
+chain at start: {"block":10688,"epoch":17,"era":"Conway","hash":"a53503fc946f1f1cb7ea34b557c8d631cb2a068ba8ebca7cf60739cd332b2439","slot":53136,"slotInEpoch":2136,"slotsToEpochEnd":864,"syncProgress":"100.00"}
+load: not running

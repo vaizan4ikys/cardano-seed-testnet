@@ -1,0 +1,3 @@
+# 130 blocks in 531 s = 14.6 blocks/min
+# 120 blocks in 569 s = 12.5 blocks/min
+# 139 blocks in 698 s = 11.9 blocks/min

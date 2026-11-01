@@ -1,0 +1,15 @@
+date: 2026-11-01T02:23:48Z    node: seedvm4    offsets: -1 -2 -3 -5 -10 5
+== clock offset -1 s on seedvm4
+-1,12,1.00,0,0
+== clock offset -2 s on seedvm4
+-2,12,0.82,10,5
+== clock offset -3 s on seedvm4
+-3,12,0.77,18,9
+== clock offset -5 s on seedvm4
+-5,134,0.41,38,19
+== clock offset -10 s on seedvm4
+-10,62,0.14,28,14
+== clock offset 5 s on seedvm4
+5,29,0.27,22,11
+clock of seedvm4 restored: System time     : 0.000000000 seconds slow of NTP time
+done: /Users/pavloharabadzhiiev/cardano-seed-testnet/experiments/measure/results/skew-main

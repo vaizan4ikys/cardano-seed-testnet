@@ -1,0 +1,5 @@
+# 676 blocks in 3175 s = 12.8 blocks/min
+# 693 blocks in 3160 s = 13.1 blocks/min
+# 687 blocks in 3149 s = 13.1 blocks/min
+# 684 blocks in 3177 s = 12.9 blocks/min
+# 679 blocks in 3173 s = 12.8 blocks/min

@@ -1,0 +1,4 @@
+delay_ms,loss_pct,machine,offset_ms,round_trip_ms
+200,0,seedvm,-2694922.1,6
+200,0,seedvm2,-2694921.9,6
+200,0,seedvm4,-2694922.1,6

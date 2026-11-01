@@ -1,0 +1,2 @@
+date: 2026-10-31T20:24:27Z    window: 600 s    scenarios: idle full
+chain at start: {"block":1213,"epoch":2,"era":"Conway","hash":"2e042510988dac219cf4c0dfc82aa5d0bb61768a0b46040ee20d94397e297f2b","slot":6036,"slotInEpoch":36,"slotsToEpochEnd":2964,"syncProgress":"100.00"}

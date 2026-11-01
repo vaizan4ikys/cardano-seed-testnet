@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cardano Testnet Measurements</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with full-width charts; every experiment is a block: question, method, chart, result, trust. */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --ink:#14181f; --ink2:#444c5a; --muted:#6f7886; --rule:#dde1e8; --soft:#eef1f5;
+  --accent:#2a78d6; --accent-ink:#184f95;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#6250d6; --ref:#8b93a1;
+  --good:#0a7d0a; --warn:#8a5a00; --bad:#b32d2d; --good-bg:#e6f4e6; --warn-bg:#fdf1d6; --bad-bg:#fbe4e4;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12151a; --surface:#1a1e25; --ink:#eceff4; --ink2:#c0c7d3; --muted:#98a1b0; --rule:#2d333d; --soft:#232832;
+  --accent:#6da7ec; --accent-ink:#9ec5f4;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9; --ref:#7d8696;
+  --good:#5fd35f; --warn:#f0b64a; --bad:#f08080; --good-bg:#17301a; --warn-bg:#35290d; --bad-bg:#3a1a1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151a; --surface:#1a1e25; --ink:#eceff4; --ink2:#c0c7d3; --muted:#98a1b0; --rule:#2d333d; --soft:#232832;
+  --accent:#6da7ec; --accent-ink:#9ec5f4;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#9085e9; --ref:#7d8696;
+  --good:#5fd35f; --warn:#f0b64a; --bad:#f08080; --good-bg:#17301a; --warn-bg:#35290d; --bad-bg:#3a1a1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 16px/1.62 var(--sans);padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:0 64px;-webkit-text-size-adjust:100%}
+.wrap{max-width:900px;margin:0 auto}
+header.top{padding-block:48px 28px;border-bottom:1px solid var(--rule)}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font:600 clamp(30px,5vw,44px)/1.1 var(--sans);letter-spacing:-.02em;margin:14px 0 14px;text-wrap:balance}
+.lede{font-size:18px;color:var(--ink2);max-width:62ch;margin:0}
+h2{font:600 26px/1.2 var(--sans);letter-spacing:-.01em;margin:0 0 6px;text-wrap:balance}
+h3{font:600 17px/1.3 var(--sans);margin:28px 0 8px}
+p{margin:0 0 14px;max-width:68ch}
+section{padding-block:44px 8px;border-bottom:1px solid var(--rule)}
+section:last-of-type{border-bottom:0}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 18px;padding-block:14px;font-size:14px;border-bottom:1px solid var(--rule)}
+nav.toc a{color:var(--ink2);text-decoration:none;border-bottom:1px solid transparent}
+nav.toc a:hover{color:var(--accent-ink);border-color:var(--accent)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:0 28px;margin:26px 0 6px;padding:0;list-style:none}
+.facts li{padding:12px 0;border-top:1px solid var(--rule);font-size:15px;color:var(--ink2)}
+.facts b{display:block;font:500 22px/1.25 var(--mono);color:var(--ink);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.qa{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:16px 0 22px;padding:16px 18px;background:var(--surface);border:1px solid var(--rule);border-radius:6px}
+.qa dt{font:500 12px/1.9 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.qa dd{margin:0;color:var(--ink2);font-size:15px}
+@media (max-width:560px){.qa{grid-template-columns:1fr}.qa dt{line-height:1.4;margin-top:6px}}
+figure{margin:20px 0 10px;padding:16px 16px 10px;background:var(--surface);border:1px solid var(--rule);border-radius:6px}
+.basis{border-left:3px solid var(--accent);background:var(--soft);padding:8px 12px;margin:8px 0 12px;font-size:14px;color:var(--ink);max-width:70ch}
+.basis b{font-weight:600}
+.example{margin:10px 0 4px;padding:10px 12px;border:1px dashed var(--rule);border-radius:4px;font-size:14px;color:var(--ink2);max-width:72ch}
+.example b{font:500 11.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-right:10px}
+figcaption.t{font:600 15px/1.35 var(--sans);margin:0 0 2px}
+figcaption.s{font-size:13px;color:var(--muted);margin:0 0 10px;max-width:70ch}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;color:var(--ink2);margin:6px 0 4px}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i{display:inline-block;width:18px;height:0;border-top:2px solid var(--c)}
+.legend i.dash{border-top-style:dashed}
+.legend i.box{width:11px;height:11px;border:0;background:var(--c);border-radius:2px}
+.plot{position:relative;width:100%}
+.plot svg{display:block;width:100%;overflow:visible}
+.plot text{font:400 12px var(--sans);fill:var(--muted)}
+.plot .axis-title{font-size:12px;fill:var(--ink2)}
+.plot .tick-x{text-anchor:middle}.plot .tick-y{text-anchor:end}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12.5px;line-height:1.45;padding:7px 10px;border-radius:5px;white-space:nowrap;z-index:5;opacity:0;transition:opacity .08s}
+.tip b{font-weight:600}.tip .r{display:flex;gap:8px;justify-content:space-between}.tip .n{font-family:var(--mono)}
+details.tbl{margin-top:6px;font-size:13px}
+details.tbl summary{cursor:pointer;color:var(--accent-ink);padding:4px 0}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 12px 7px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font:500 12px/1.3 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+td.n,th.n{text-align:right;font-family:var(--mono);padding-right:14px}
+.card-table{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:6px 16px 10px;margin:14px 0}
+.trust{display:inline-flex;align-items:center;gap:7px;font:500 13px/1 var(--sans);padding:6px 10px;border-radius:4px;margin:2px 0 12px}
+.trust.good{background:var(--good-bg);color:var(--good)}.trust.warn{background:var(--warn-bg);color:var(--warn)}.trust.bad{background:var(--bad-bg);color:var(--bad)}
+.takeaway{border-left:3px solid var(--accent);padding:2px 0 2px 16px;margin:18px 0;color:var(--ink);max-width:68ch}
+.glossary{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:0 32px;margin:12px 0}
+.glossary div{padding:10px 0;border-top:1px solid var(--rule);font-size:15px;color:var(--ink2)}
+.glossary b{color:var(--ink);font-weight:600}
+code{font:400 13.5px var(--mono);background:var(--soft);padding:1px 5px;border-radius:3px}
+.diagram{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:14px;margin:18px 0;overflow-x:auto}
+.diagram svg{display:block;min-width:620px;width:100%;height:auto}
+.diagram text{font:400 13px var(--sans);fill:var(--ink2)}
+.diagram .b{font-weight:600;fill:var(--ink)}
+.diagram .m{font:400 11.5px var(--mono);fill:var(--muted)}
+.diagram .box{fill:var(--soft);stroke:var(--rule);stroke-width:1.2}
+.diagram .pool{fill:var(--surface);stroke:var(--s1);stroke-width:1.6}
+.diagram .rogue{fill:var(--surface);stroke:var(--s2);stroke-width:1.6;stroke-dasharray:5 3}
+.diagram .ln{stroke:var(--ref);stroke-width:1.6;fill:none}
+.diagram .ln2{stroke:var(--s2);stroke-width:1.6;fill:none;stroke-dasharray:5 3}
+footer{padding-top:32px;font-size:13px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">CyberTel · sensor data on a blockchain · 29 October to 1 November 2026</div>
+  <h1>Cardano Testnet Measurements</h1>
+  <p class="lede">A private Cardano network with three block-producing pools runs inside the SEED emulator. Four virtual machines on one Mac stood in for a small distributed system. We measured how fast new nodes join, how fast blocks and transactions travel, how much sensor data the chain can carry, and what a foreign network does to it. This page says why each measurement was taken and what the numbers mean.</p>
+  <ul class="facts">
+    <li><b>≈ 300 readings/s</b>what the 5-second-block testnet can store, at the best batch size</li>
+    <li><b>≈ 3.2 × delay</b>how long a full block needs to cross one slow link, as a multiple of that link's delay</li>
+    <li><b>12 s → 81 s</b>join time for a 240 MB chain, without and with 100 ms of link delay</li>
+    <li><b>20 ms</b>time a wrong-magic outsider needs to be refused; no effect on the real chain</li>
+  </ul>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#summary">Summary</a><a href="#setup">Setup</a><a href="#join">1 · Joining</a><a href="#prop">2 · Block travel</a><a href="#hops">3 · Hops</a><a href="#tx">4 · Transactions</a>
+  <a href="#forks">5 · Forks</a><a href="#sat">6 · Capacity</a><a href="#links">7 · Real links</a><a href="#resil">8 · Failures</a><a href="#scale">9 · Scale</a><a href="#outsider">10 · Outsiders</a><a href="#trust">Trust</a><a href="#hyp">Unproven</a><a href="#next">Next</a>
+</nav>
+
+<section id="summary">
+  <h2>What this means for CyberTel</h2>
+  <div class="basis"><b>Read this first.</b> All four machines are virtual machines on one Mac, so they share CPU and disk. Delay, loss and speed limits are emulated on the sending side of each node. The chain is private and small, with three pools, and many results come from one to three runs. Read the numbers as sizes of effects and as comparisons between settings, not as predictions for a real wide-area network.</div>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Question</th><th>Answer</th><th class="n">Section</th></tr></thead>
+    <tbody>
+      <tr><td>How much sensor data can one chain take?</td><td>About 300 readings per second on the testnet with 5-second blocks (batches of 100 to 300 readings per transaction), and about 100 to 120 with 20-second blocks. Waiting time jumps from seconds to minutes at the limit.</td><td class="n">6</td></tr>
+      <tr><td>How long until a reading is stored?</td><td>In a block after about 6 s (5-second blocks) or about 13 s (20-second blocks); the network's share is under 1 s. It cannot be undone after about 5 minutes (60 blocks) on the testnet.</td><td class="n">4, 8</td></tr>
+      <tr><td>How far apart can the pools be?</td><td>With 5-second blocks up to about 100 ms; at 300 ms, 22% of the blocks are lost to forks. With 20-second blocks, 500 ms is fine (6% lost).</td><td class="n">5</td></tr>
+      <tr><td>What does a slow link cost a site?</td><td>A block arrives after 3.2 times the link delay, plus 7.1 times the delay for every relay in between. Joining (0.6 GB) takes about 28 s on a good link, 3 minutes on 4G and 13 minutes on rural DSL.</td><td class="n">1, 2, 3, 7</td></tr>
+      <tr><td>How much data does a site transfer?</td><td>About 1 GB per day at full capacity, about 0.03 GB per day when idle.</td><td class="n">9</td></tr>
+      <tr><td>What if a pool or a node fails?</td><td>The chain keeps running with one or two of three pools stopped, and the pools agree again about 1 to 2 minutes after a short cut. A pool isolated for 15 minutes cannot rejoin by itself; wiping its database and restarting fixes it in under a minute.</td><td class="n">8</td></tr>
+      <tr><td>How many nodes can one pool serve?</td><td>At least 12 with the same CPU load (about 3%); block arrival gets 11 ms slower.</td><td class="n">9</td></tr>
+      <tr><td>What if a site's clock is wrong?</td><td>A clock 2 s or more behind makes the node drop its connection again and again (up to 13 times in 2 minutes), and it is up to date only 50 to 95% of the time. A clock that is ahead is harmless.</td><td class="n">9</td></tr>
+      <tr><td>What can an outsider do?</td><td>A node with another magic number is refused in 20 ms. With the same magic and another genesis it connects, but its chain is rejected at the first block. No effect on the real chain was seen.</td><td class="n">10</td></tr>
+    </tbody></table></div>
+  <h3>What we would do with it</h3>
+  <p>These are our recommendations, drawn from the numbers. They are judgements, not measurements.</p>
+  <div class="glossary">
+    <div><b>Batch the readings.</b> Send 100 or more readings per transaction.</div>
+    <div><b>Keep headroom.</b> Stay under about 70% of the limit, about 200 readings per second on the testnet.</div>
+    <div><b>Keep the pools close.</b> Within about 100 ms of each other with 5-second blocks.</div>
+    <div><b>Keep sites close to a pool.</b> Connect gateways directly to a pool, or one relay away at most.</div>
+    <div><b>Synchronise the clocks.</b> Every site needs time synchronisation with an error well under 2 s.</div>
+    <div><b>Help slow sites join.</b> Offer a database snapshot or a nearby relay for sites on slow lines.</div>
+    <div><b>Plan for a split pool.</b> Alarm when a pool's tip differs from the others for more than a few minutes, and keep the wipe-and-resync routine ready.</div>
+  </div>
+</section>
+
+<section id="setup">
+  <h2>What was built</h2>
+  <p>CyberTel wants sensor readings stored on a blockchain that several sites share. Before choosing parameters, we need to know what such a network does when its links are slow, when nodes join late, and when the load grows. Cardano replaced Ethereum in the earlier SEED project, so this network is a Cardano one.</p>
+  <div class="diagram" role="img" aria-label="Diagram: seedvm hosts three pools and exposes pool 1; seedvm2 dials a pool; seedvm4 dials seedvm2; seedvm3 is the spare machine used for the rogue node.">
+    <svg viewBox="0 0 760 300">
+      <rect class="box" x="10" y="20" width="250" height="250" rx="8"/>
+      <text class="b" x="26" y="46">seedvm · 4 GB, 2 CPU</text><text class="m" x="26" y="64">SEED emulator, network magic 42</text>
+      <rect class="pool" x="30" y="84" width="200" height="40" rx="5"/><text x="46" y="109">Pool 1 · AS150 (port 3001 open)</text>
+      <rect class="pool" x="30" y="136" width="200" height="40" rx="5"/><text x="46" y="161">Pool 2 · AS151</text>
+      <rect class="pool" x="30" y="188" width="200" height="40" rx="5"/><text x="46" y="213">Pool 3 · AS152</text>
+      <text class="m" x="26" y="252">pools forge blocks, load and tests run here</text>
+      <rect class="box" x="330" y="20" width="190" height="62" rx="8"/><text class="b" x="346" y="46">seedvm2 · hop 1</text><text class="m" x="346" y="64">joins by dialling a pool</text>
+      <rect class="box" x="330" y="108" width="190" height="62" rx="8"/><text class="b" x="346" y="134">seedvm3 · spare</text><text class="m" x="346" y="152">3rd joiner / rogue node</text>
+      <rect class="box" x="560" y="20" width="190" height="62" rx="8"/><text class="b" x="576" y="46">seedvm4 · hop 2</text><text class="m" x="576" y="64">joins through seedvm2</text>
+      <path class="ln" d="M230 104 H280 V51 H330"/><path class="ln" d="M520 51 H560"/><path class="ln2" d="M230 156 H330"/>
+      <text class="m" x="268" y="180">rogue</text>
+      <text x="330" y="206" class="m">delay, loss and speed limits are added on</text><text x="330" y="222" class="m">each joiner's own network card (Linux tc/netem)</text>
+      <text x="330" y="252" class="m">all four VMs share one Mac: CPU is shared too</text>
+    </svg>
+  </div>
+  <p>Two parameter sets were used. The first ("testnet") has fast blocks so that every experiment finishes quickly. The second copies the block rhythm of Cardano mainnet.</p>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Setting</th><th class="n">Testnet</th><th class="n">Mainnet-like</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Chance a second has a block (f)</td><td class="n">0.2</td><td class="n">0.05</td><td>one block every ≈5 s, or every ≈20 s</td></tr>
+      <tr><td>Largest block</td><td class="n">64 KB</td><td class="n">88 KB</td><td>blocks hold at most this many bytes of transactions</td></tr>
+      <tr><td>Largest transaction</td><td class="n" colspan="2">16 KB</td><td>both sets</td></tr>
+      <tr><td>Security parameter k</td><td class="n">60</td><td class="n">2160</td><td>how deep a block must be before it can no longer be undone</td></tr>
+      <tr><td>Dead after standing still</td><td class="n">15 min</td><td class="n">36 h</td><td>3k/f: the chain cannot recover after that</td></tr>
+    </tbody></table></div>
+
+  <h3>Conditions of each experiment</h3>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Section</th><th>Chain</th><th>Load</th><th>Runs</th></tr></thead>
+    <tbody>
+      <tr><td>1 · Joining (growth)</td><td>testnet, 27 to 240 MB</td><td>on</td><td>12 checkpoints, 2 to 3 joins each</td></tr>
+      <tr><td>1 · Joining (delay, loss)</td><td>testnet, about 10,000 blocks; small: almost empty</td><td>on; small: off</td><td>2 per setting; small: 3</td></tr>
+      <tr><td>2 · Block travel</td><td>testnet; empty and full blocks</td><td>off (empty), on (full)</td><td>40 to 130 blocks per setting</td></tr>
+      <tr><td>3 · Many hops</td><td>testnet; propagation at 90 to 100 MB, joins at 627 MB</td><td>on; joins: off</td><td>propagation 1 run; joins 3 runs</td></tr>
+      <tr><td>4 · Transactions</td><td>testnet and mainnet-like</td><td>mixed</td><td>6 to 10 per cell</td></tr>
+      <tr><td>5 · Forks</td><td>testnet (20 min) and mainnet-like (30 min)</td><td>on</td><td>1 run per delay</td></tr>
+      <tr><td>6 · Capacity</td><td>testnet at 353 MB; mainnet-like small</td><td>off</td><td>2-minute steps</td></tr>
+      <tr><td>7 · Real links</td><td>testnet, about 10,700 blocks</td><td>off</td><td>1 to 2 joins per profile</td></tr>
+      <tr><td>8 · Finality, outages, failures</td><td>testnet</td><td>on</td><td>12 transactions; 1 to 5 outages per setting; 1 failure run</td></tr>
+      <tr><td>9 · Traffic, many nodes, clocks</td><td>testnet</td><td>traffic: off and on; others: on, off</td><td>1 window; 1 run; 3 runs per offset</td></tr>
+      <tr><td>10 · Outsiders</td><td>testnet</td><td>off</td><td>1 run per case</td></tr>
+    </tbody></table></div>
+</section>
+<section id="words">
+  <h2>Words used</h2>
+  <div class="glossary">
+    <div><b>Block</b> A batch of transactions that one pool adds to the chain. Everyone then agrees it exists.</div>
+    <div><b>Reading</b> One sensor measurement. In the tests it is a 40-character text (42 bytes on the chain).</div>
+    <div><b>Transaction</b> One message sent to the chain. It has a fixed part of about 245 bytes and can carry many readings.</div>
+    <div><b>Mempool</b> The waiting room of a node. A transaction sits there until a pool puts it into a block.</div>
+    <div><b>Hop</b> Hop 1 is a node that connects directly to a pool. Hop 2 connects through a hop-1 node.</div>
+    <div><b>Join</b> A new node with an empty database downloads the whole chain until it is up to date.</div>
+    <div><b>Fork, orphan</b> Two pools make a block at almost the same time. One block loses and is dropped: an orphan.</div>
+    <div><b>Median, p90, p95</b> The typical value; and the value that 10% (or 5%) of cases exceed.</div>
+    <div><b>Delay</b> Milliseconds added to every packet a node sends. A delay of 100 ms adds 100 ms to the round trip.</div>
+    <div><b>Magic</b> A number every node announces when it connects. Nodes with a different number refuse each other.</div>
+  </div>
+</section>
+<section id="join">
+  <h2>1 · How long does a new node need to join?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How does the time to join grow with the size of the chain, with link delay, and with packet loss?</dd>
+    <dt>Why</dt><dd>A new site, or a node that crashed and lost its data, must catch up before it can serve anyone. This sets the recovery time.</dd>
+    <dt>Method</dt><dd>A fresh node with an empty database starts, dials a pool, and downloads the chain. The timer stops when its newest block is less than 20 s old. A transaction load kept the blocks about 91% full while the chain grew for 6 hours (12 checkpoints, one every 30 min).</dd>
+  </dl>
+
+  <figure>
+    <figcaption class="t">Join time against chain size</figcaption>
+    <figcaption class="s">One hop-1 node. Each point is one checkpoint of the growth run. The dashed line adds 100 ms of delay.</figcaption>
+    <div id="c-growth"></div>
+    <div class="example"><b>Example</b>A new site joins when the chain has grown to about 150 MB. On a good local link it is up to date after about 9 s. If the site's link adds 100 ms, the same join takes about 54 s. At 240 MB the two times are 12 s and 81 s.</div>
+  </figure>
+  <p>Without extra delay the join takes 3.5 s at 27 MB and 12.4 s at 239 MB. With 100 ms of delay it takes 13 s and 81 s, so the delay cost grows with the amount of data. Copy speed settles near 20 MB/s. We did not test what limits it; the VM's CPU or disk are the likely cause. Three nodes joining at the same time needed about 1.35 times as long as one (16.7 s against 12.4 s at the last checkpoint). Two checkpoints were 2.6 and 3.3 times slower; we did not find out why.</p>
+
+  <figure>
+    <figcaption class="t">Join time against link delay, small and large chain</figcaption>
+    <figcaption class="s">Solid: chain of about 10,000 blocks. Dashed: the first series on an almost empty chain. Hop 2 downloads through hop 1.</figcaption>
+    <div id="c-joindelay"></div>
+    <div class="example"><b>Example</b>A site joins the large chain (about 10,000 blocks) over a link that adds 100 ms. Connected straight to a pool (hop 1) it needs about 110 s. Connected through another node (hop 2) it needs about 211 s. At 200 ms the times are 256 s and 480 s (8 minutes). On the almost empty chain the same 200 ms cost only 5 to 6 s.</div>
+  </figure>
+  <p>On the large chain every millisecond of delay costs about 1.3 s of join time at hop 1 and 2.4 s at hop 2 (256 s and 480 s at 200 ms). Section 3 shows that this doubling happens once, from hop 1 to hop 2, and does not grow with deeper hops. On the small chain the same millisecond cost 0.02 s. Delay punishes big chains, because the download needs many round trips.</p>
+
+  <h3>Packet loss</h3>
+  <p>One percent loss barely matters at 0 ms: 18.6 s against 16.4 s. At 100 ms plus 1% loss, hop 1 still took 121 s, but hop 2 did not finish within 900 s in either repetition. Hop 2 downloads over hop 1's lossy link, and TCP slows sharply when loss and delay meet on a link that carries bulk data. This is the expected TCP behaviour and was not tested further.</p>
+  <span class="trust good">● Solid · trend is clean over 12 checkpoints; the 3-node values are noisy (n = 2)</span>
+  <div class="takeaway">A node that joins over a slow or lossy link needs minutes, not seconds. For distant sites a database snapshot is probably a better start than a full download.</div>
+</section>
+<section id="prop">
+  <h2>2 · How fast does a block travel?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>When a pool makes a block, how many milliseconds later does a node one or two hops away have it?</dd>
+    <dt>Why</dt><dd>Slow travel means pools build on old blocks and create forks. It also bounds how fresh a reading can be at a remote site.</dd>
+    <dt>Method</dt><dd>Every node writes a millisecond timestamp when a block becomes its newest. The first node to log a block is the forger. The others' delay is their timestamp minus that one. The VM clocks were aligned to about 1 ms and measured again for every run.</dd>
+  </dl>
+
+  <figure>
+    <figcaption class="t">Block arrival time against link delay</figcaption>
+    <figcaption class="s">Median milliseconds behind the forging pool. Solid lines: full 60 KB blocks (load running). Dashed lines: nearly empty blocks.</figcaption>
+    <div id="c-prop"></div>
+    <div class="example"><b>Example</b>A pool makes a full block (60 KB). A node connected straight to that pool over a link with 100 ms of delay has the block about 323 ms later. A second node behind the first one, also with 100 ms, has it after about 1.0 s. With empty blocks the same two links need 107 ms and 412 ms.</div>
+  </figure>
+  <p>With almost empty blocks hop 1 sees a block after about 1 times the delay and hop 2 after about 4 times (100 ms gives 107 ms and 412 ms). With full blocks the factor at hop 1 rises to about 3 (323 ms at 100 ms, 608 ms at 200 ms), and hop 2 sees them after about 10 times the delay. A 60 KB block does not fit into one TCP window, so it needs several round trips. The mainnet-like chain, which also had nearly empty blocks, gave the same factors as the first testnet series (209/812 ms at 200 ms, 512/2021 ms at 500 ms). That points to block size, not block rhythm, as the cause. This explanation was not isolated in a separate test.</p>
+
+  <h3>Which link adds what?</h3>
+  <p>Delay was put on one joiner at a time, with full blocks, 8 minutes per setting (about 100 blocks each).</p>
+  <figure>
+    <figcaption class="t">Delay on one link or both</figcaption>
+    <figcaption class="s">Settings are "delay on hop 1 / delay on hop 2" in ms. Bars show the median arrival time at each node.</figcaption>
+    <div id="c-asym"></div>
+    <div class="example"><b>Example</b>Only hop 1's link is slow (100 ms). Hop 1 gets blocks after 322 ms. Hop 2 has a normal link and still gets them after 730 ms, because every block passes through hop 1. If only hop 2's link is slow, hop 1 stays at 18 ms and hop 2 gets the blocks after 330 ms.</div>
+  </figure>
+  <p>A delay on a node's own link costs that node about 3.1 to 3.3 times the delay (322 ms for 100 ms, 617 ms for 200 ms). A delay on hop 1 adds about 4 more times the delay for hop 2. Delay on hop 2 does not hurt hop 1 (17 ms). With both links at 100 ms, hop 2 receives blocks after 1034 ms. The effects add up and double when the delay doubles.</p>
+  <span class="trust good">● Solid · windows fixed and re-analysed; hop-1 and hop-2 results agree between runs</span>
+  <div class="takeaway">In a chain of relays, delay accumulates over every hop and a full block pays three to four times each delay. Pools should sit close to each other, and sensor gateways should dial a pool directly.</div>
+</section>
+<section id="hops">
+  <h2>3 · Many hops: does the cost per hop stay the same?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>In a chain of up to 6 nodes, each one connected to the previous, how do block arrival, join time and transaction time grow with the number of hops?</dd>
+    <dt>Why</dt><dd>Section 2 measured only 1 and 2 hops, so it could not say whether the cost per hop stays the same. Sensor sites will often reach the chain through relays.</dd>
+    <dt>Method</dt><dd>Six nodes in a chain on the three joiner VMs (two nodes per VM). Node k dials node k-1, and node 1 dials a pool. Every node has the delay on what it sends, so beyond the first link the delay acts in both directions of a link. Delays of 0, 50 and 100 ms, full blocks, 7 minutes of samples per delay. The chain had grown to about 90 to 100 MB.</dd>
+  </dl>
+  <figure>
+    <figcaption class="t">Block arrival time against hop number</figcaption>
+    <figcaption class="s">Median milliseconds after the pool made the block, at the node that is k hops away. Full blocks. One line per delay.</figcaption>
+    <div id="c-hops"></div>
+    <div class="example"><b>Example</b>A site is 6 relays away from the pool and every link adds 100 ms. It has each block about 3.9 s after the pool made it. With 50 ms per link it needs about 2 s, and with no added delay 46 ms.</div>
+  </figure>
+  <p>The lines are straight. The first hop costs about 3.2 times the delay, and every further hop adds about 7.1 times the delay: at 100 ms, 316 ms for hop 1, then 711 ms more per hop, which gives 3,871 ms at hop 6 (316 + 5 × 711). At 50 ms the steps are 360 ms. With no added delay each hop adds about 6 ms of processing. This confirms the guess in section 2 for hop 3 and beyond. A relay adds a request and a download, each carrying the delay, and a full 60 KB block needs several round trips.</p>
+  <figure>
+    <figcaption class="t">Join time against hop number</figcaption>
+    <figcaption class="s">Seconds until a new node, joining from the previous node in the chain, is up to date. Median of 3 repetitions on a chain of 627 MB.</figcaption>
+    <div id="c-hopjoin"></div>
+    <div class="example"><b>Example</b>With 100 ms on every link, a node joining at hop 1 needs about 199 s (3.3 minutes) and a node joining at hop 6 needs about 377 s (6.3 minutes). A node at hop 2 needs the same 383 s as one at hop 6. With no added delay every join takes about 28 s.</div>
+  </figure>
+  <p>Join time does not grow with depth. A node only talks to the node it joins from, so only that one link counts. Hop 1 needs about half as long as the others because the pool's side of that link has no added delay. Each value is the median of three repetitions on a chain of 627 MB. The repetitions agree within 3% (one hop-3 run at 100 ms took 397 s against 380 and 386 s), and there is no outlier in these 54 joins. An earlier run on a chain of 100 MB showed the same pattern (32 s at hop 1, about 61 s from hop 2 on), plus one join at hop 5 that took 35 s, probably a reconnection pause; we repeated the series because of it.</p>
+  <p>The formula from section 1 fits well when the size is the data actually received: 2 s + MB × (0.042 + 0.0029 × delay in ms). For 627 MB it gives 28 s at no delay (measured 28 s), and from hop 2 on, where the delay part is doubled, 392 s at 100 ms (measured 383 s) and 210 s at 50 ms (measured 194 s).</p>
+  <p>The nodes received 79 MB at block 1,491, 100 MB at block 1,834 and 627 MB at block 10,700, about 53 to 59 KB per block. That settles the earlier estimate of about 0.5 GB for a chain of 10,700 blocks: it is a little more, 0.6 GB.</p>
+  <p>A transaction needs about 3 times the delay per hop to reach the pool's waiting room: 0.04 s at no delay, and at hop 6 about 0.9 s (50 ms) and 1.8 s (100 ms). The time until the block is too noisy to quote.</p>
+  <span class="trust good">● Solid · straight lines for 3 delays and 6 hops; the join times are the median of 3 repetitions</span>
+  <div class="takeaway">Every relay between a site and the pool adds about 7 times the link delay to block arrival. A site should be as few hops from a pool as possible. Joining a new node costs the same at any depth.</div>
+</section>
+<section id="tx">
+  <h2>4 · How long until a transaction is in a block?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How long does a transaction take to reach the pool's waiting room, and how long until it is in a block?</dd>
+    <dt>Why</dt><dd>This is the delay between a sensor reading and the moment it is stored.</dd>
+    <dt>Method</dt><dd>A node submits one metadata transaction. We time (a) the moment the pool's mempool holds it and (b) the moment the node sees it in a block. Six to ten transactions per setting.</dd>
+  </dl>
+  <figure>
+    <figcaption class="t">Time until the pool's mempool holds the transaction</figcaption>
+    <figcaption class="s">Median seconds against link delay. Only the network is in play here; no waiting for a block.</figcaption>
+    <div id="c-mempool"></div>
+    <div class="example"><b>Example</b>A gateway connected straight to a pool over a link that adds 200 ms sends a transaction. The pool has it in its waiting room after about 0.44 s. Behind one more node (hop 2) it takes about 1 s. At 500 ms the times are about 1 s and 2.5 s. Everything after that is waiting for the next block.</div>
+  </figure>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Chain</th><th>Link delay</th><th class="n">In a block, hop 1 (s)</th><th class="n">In a block, hop 2 (s)</th></tr></thead>
+    <tbody>
+      <tr><td>Testnet, first series</td><td>0–500 ms</td><td class="n" colspan="2">median 4.1, p90 9.7, max 26 (200 transactions)</td></tr>
+      <tr><td>Testnet, full blocks</td><td>0 ms</td><td class="n">4.7</td><td class="n">3.2</td></tr>
+      <tr><td>Testnet, full blocks</td><td>100 ms</td><td class="n">8.5</td><td class="n">6.4</td></tr>
+      <tr><td>Testnet, full blocks</td><td>200 ms</td><td class="n">9.2</td><td class="n">11.1</td></tr>
+      <tr><td>Mainnet-like</td><td>0 ms</td><td class="n">17.1</td><td class="n">8.6</td></tr>
+      <tr><td>Mainnet-like</td><td>200 ms</td><td class="n">7.2</td><td class="n">7.3</td></tr>
+      <tr><td>Mainnet-like</td><td>500 ms</td><td class="n">20.5</td><td class="n">17.0</td></tr>
+    </tbody></table></div>
+  <p>The network part is small: 0.04 s at 0 ms and about 1 s (hop 1) or 2.5 s (hop 2) at 500 ms. The rest is waiting for the next block. A transaction that arrives right after a block waits a full block interval, so the typical wait is about 4 s with 5-second blocks and 13 s with 20-second blocks (median over all 36 mainnet-like transactions, worst case 93 s). Each cell has only 6 to 10 transactions, so differences between rows of a few seconds are noise.</p>
+  <span class="trust warn">▲ Rough · the mempool times are consistent; the block times are noisy</span>
+  <div class="takeaway">Storing a reading takes roughly one block interval plus up to a second of network. Making blocks faster is the only way to make storage faster.</div>
+</section>
+<section id="forks">
+  <h2>5 · When do pools start to fork?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How many blocks are lost to forks as the delay between the pools grows?</dd>
+    <dt>Why</dt><dd>Each orphaned block is wasted work and shows that pools disagree for a moment. If the pools were in different cities, this tells us how far apart they may be.</dd>
+    <dt>Method</dt><dd>Delay was added to all three pools' own traffic. For each delay we counted for 20 minutes (testnet) or 30 minutes (mainnet-like), with the transaction load running: blocks forged by the pools against blocks that ended up on the chain. The difference is the orphans.</dd>
+  </dl>
+  <figure>
+    <figcaption class="t">Share of forged blocks that were lost</figcaption>
+    <figcaption class="s">Orphaned blocks as a percentage of all blocks forged, against the delay between the pools.</figcaption>
+    <div id="c-forks"></div>
+    <div class="example"><b>Example</b>The pools are 300 ms apart on the 5-second testnet. Of 100 blocks the pools make, about 22 are lost, because a pool made its block before the previous one reached it. On the 20-second mainnet-like chain, even 500 ms apart loses only about 6 of 100.</div>
+  </figure>
+  <p>On the testnet, 6% of the blocks are lost even without extra delay, because two pools are sometimes elected in the same second. Up to 100 ms nothing changes. At 300 ms 22% are lost and at 600 ms 27%, and the chain grows from 11.6 to 8.5 blocks per minute. On the mainnet-like chain, 20-second blocks tolerate much more: no orphans at 0 ms, 6% at 500 ms and 13% at 1000 ms. The block rate fell to 90% and 68% of its starting value.</p>
+  <span class="trust good">● Solid for the testnet and for 0–1000 ms on the mainnet-like chain</span>
+  <span class="trust bad">✕ Do not use · mainnet-like, 2000 ms: pool 1 lost its connections to the others and forged alone for about 80 minutes (see Trust)</span>
+  <div class="takeaway">With 5-second blocks, pools should stay below about 100 ms from each other. With 20-second blocks, 500 ms is acceptable. Many city pairs inside Europe are less than 50 ms apart.</div>
+</section>
+<section id="sat">
+  <h2>6 · How many readings per second can the chain take?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>Where is the limit, and how does waiting time behave when we get close to it?</dd>
+    <dt>Why</dt><dd>It tells how many sensors one network can serve and how much batching is needed. At 100 readings/s the chain serves about 6,000 sensors that report once a minute.</dd>
+    <dt>Method</dt><dd>From inside pool 1, transactions of 1, 10, 100 or 300 readings were submitted at a fixed rate for 2 minutes per step. Each transaction was timed from its planned send time to the block that holds it. The load was stopped during this test.</dd>
+  </dl>
+  <div class="card-table scroll"><table>
+    <thead><tr><th class="n">Readings per transaction</th><th class="n">Transaction size</th><th class="n">Transactions per block</th><th class="n">Readings per block</th><th class="n">Readings per second</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">285 B</td><td class="n">≈ 229</td><td class="n">≈ 229</td><td class="n">≈ 46</td></tr>
+      <tr><td class="n">10</td><td class="n">663 B</td><td class="n">≈ 98</td><td class="n">≈ 980</td><td class="n">≈ 196</td></tr>
+      <tr><td class="n">100</td><td class="n">4,444 B</td><td class="n">≈ 14</td><td class="n">≈ 1,400</td><td class="n">≈ 280</td></tr>
+      <tr><td class="n">300</td><td class="n">12,845 B</td><td class="n">5</td><td class="n">1,500</td><td class="n">≈ 300</td></tr>
+    </tbody></table></div>
+  <figure>
+    <figcaption class="t">Readings stored per second against readings offered, testnet</figcaption>
+    <figcaption class="s">The dotted line is "everything offered is stored". The curves bend away from it near the limits in the last column of the table above.</figcaption>
+    <div class="basis"><b>Based on the table above.</b> The limits in its last two columns (readings per block, readings per second) are calculated. This chart shows what was measured against them.</div>
+    <div id="c-sat"></div>
+    <div class="example"><b>Example</b>Each transaction carries 100 readings. The generator offers 200 readings per second (2 transactions per second) and the chain stores 197 per second, almost all of it. The generator offers 290 per second: the chain stores 274 and the rest waits in the queue.</div>
+  </figure>
+  <p>The limit is about 300 readings/s, which fits the calculation: five 300-reading transactions per block, about twelve blocks per minute, 307 readings/s. Batches of 1 and 10 readings reached only 20 and 148 readings/s because the test program (one <code>cardano-cli</code> process per transaction) could not send faster. The node itself could have taken about 47 small transactions per second. No transaction was lost and none was rejected. When the node's waiting room is full (129 KB), the submit command waits instead of failing. This is inferred from the results and not tested separately.</p>
+  <figure>
+    <figcaption class="t">Waiting time near the limit, testnet</figcaption>
+    <figcaption class="s">Seconds from the planned send time to the block, against the readings per second the generator tried to send. Logarithmic scale. Solid: median. Dashed: p90.</figcaption>
+    <div id="c-lat"></div>
+    <div class="example"><b>Example</b>Transactions of 100 readings. At 200 readings per second a transaction typically waits 4.7 s, and 1 in 10 waits more than 10.8 s. At 400 per second the typical wait is 30 s and 1 in 10 waits more than 57 s. At 600 per second the typical wait is 103 s.</div>
+  </figure>
+  <p>Below the limit a reading waits about 3 to 5 s (median). Above it the waiting time explodes: with 100-reading transactions the median is 4.7 s at 200 readings/s, 30 s at 400 and 103 s at 600. Even far below the limit some readings wait long, because blocks come at random moments: p90 is 17 s with single readings at 2 per second.</p>
+  <figure>
+    <figcaption class="t">Best result with the two parameter sets</figcaption>
+    <figcaption class="s">Readings per second stored, at 100 and 300 readings per transaction.</figcaption>
+    <div class="basis"><b>Calculated limits.</b> Readings per second = readings per block ÷ seconds between blocks. Testnet (table above: 64 KB blocks, one every 5 s): 1,400 readings per block with 100 per transaction and 1,500 with 300, so about 280 and 300 per second. Mainnet-like (88 KB blocks, one every 20 s): 20 transactions of 100 readings = 2,000 per block, or 7 of 300 = 2,100, so about 100 and 105 per second. The bars differ from these by 10 to 20% because each step lasted only 2 minutes, about 6 blocks on the mainnet-like chain.</div>
+    <div id="c-sat2"></div>
+    <div class="example"><b>Example</b>Transactions of 100 readings. The testnet stores about 274 readings per second, the mainnet-like chain about 117 (calculated: 100). So 1,000 sensors that send one reading every 10 seconds (100 per second) fit on either chain, but 1,000 sensors that send one reading every 5 seconds (200 per second) fit only on the testnet.</div>
+  </figure>
+  <p>The mainnet-like chain, with 3 blocks per minute of 88 KB, stored about 120 readings/s, against 330 on the testnet. The calculation gives about 105, so the numbers fit. Each step saw only about 6 blocks, so single values are noisy.</p>
+  <span class="trust warn">▲ Rough · the limit and the shape are clear; single steps are off by about 10%</span>
+  <div class="takeaway">One Cardano network of this kind takes a few hundred readings per second. Batching 100 or more readings per transaction is necessary; the waiting time then jumps from seconds to minutes at the limit, so the load should stay under about 70% of it.</div>
+</section>
+<section id="links">
+  <h2>7 · What happens on realistic links?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How long does a join take on a link with real-world speed, delay and loss?</dd>
+    <dt>Why</dt><dd>Sensor sites will not sit in a data center. Plain delay (sections 1 to 3) leaves out the bandwidth.</dd>
+    <dt>Method</dt><dd>Five profiles with download and upload caps, one-way delay and loss added to the joiner. The data transferred is about 0.5 GB (cap times time). Each profile ran one or two joins.</dd>
+  </dl>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Profile</th><th class="n">Down / up (Mbit/s)</th><th class="n">Delay (ms)</th><th class="n">Loss</th><th class="n">Hop 1 join (s)</th><th class="n">Hop 2 join (s)</th><th class="n">Block arrival hop 1 (ms)</th></tr></thead>
+    <tbody>
+      <tr><td>Fibre</td><td class="n">100 / 100</td><td class="n">5</td><td class="n">0%</td><td class="n">43</td><td class="n">47</td><td class="n">15</td></tr>
+      <tr><td>Cable</td><td class="n">50 / 10</td><td class="n">10</td><td class="n">0.1%</td><td class="n">82</td><td class="n">391</td><td class="n">20</td></tr>
+      <tr><td>Mobile 4G</td><td class="n">20 / 5</td><td class="n">40</td><td class="n">0.5%</td><td class="n">199</td><td class="n">not run</td><td class="n">55</td></tr>
+      <tr><td>Rural DSL</td><td class="n">5 / 2</td><td class="n">25</td><td class="n">0.5%</td><td class="n">783</td><td class="n">not run</td><td class="n">38</td></tr>
+      <tr><td>Satellite</td><td class="n">25 / 3</td><td class="n">300</td><td class="n">0.5%</td><td class="n">593</td><td class="n">not run</td><td class="n">317</td></tr>
+    </tbody></table></div>
+  <figure>
+    <figcaption class="t">Join time at hop 1 against the time the download cap alone would need</figcaption>
+    <figcaption class="s">Seconds. "Cap only" is 0.5 GB divided by the download speed.</figcaption>
+    <div id="c-prof"></div>
+    <div class="example"><b>Example</b>A remote site on rural DSL (5 Mbit/s down) needs about 13 minutes (783 s) to join. A site on 4G (20 Mbit/s) needs about 3 minutes. On the satellite link, which has a fast 25 Mbit/s line, the join takes about 10 minutes (593 s) because of its 300 ms delay.</div>
+  </figure>
+  <p>Four profiles match the cap: the speed of the line decides how long a join takes. The satellite profile needs 3.7 times longer than its cap suggests, because the 300 ms delay adds to every round trip. Hop 2 of the cable profile (391 s) is limited by hop 1's 10 Mbit/s upload, since hop 2 downloads through hop 1. Once synced, block arrival is fast on every profile except satellite.</p>
+  <span class="trust good">● Solid for the join times · one fibre hop-2 run took 97 s because other work ran on the machines at the same time; the value above is the clean repetition</span>
+  <div class="takeaway">On rural DSL a join takes 13 minutes; the chain gets bigger every day. A relay or snapshot service close to the remote sites is needed. Normal operation after the join works on all profiles.</div>
+</section>
+<section id="resil">
+  <h2>8 · Finality, outages and failures</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How long until a stored reading can no longer be undone? What happens when a node or a pool is cut off, and does the chain heal?</dd>
+    <dt>Why</dt><dd>A system that stores evidence needs to know when a record is final, and how it behaves when an organisation's pool loses its connection.</dd>
+    <dt>Method</dt><dd>5-second testnet with the load running. Finality: 12 small transactions, each timed until the chain tip is 60 blocks deeper (60 is the security parameter k). Catch-up: a node is cut off (all packets it sends dropped), reconnected, and timed until it is within 20 seconds of the chain clock. Failures: pools stopped or cut off by stopping their network router, then switched back on. We time how long until the three pools show the same tip.</dd>
+  </dl>
+  <h3>Finality</h3>
+  <p>A transaction is in a block after about 6 s (6.1 s on average). It is final, 60 blocks deep, after about 310 s, a little over 5 minutes (295 to 332 s over 12 transactions). The 60 blocks need about 305 s after the transaction is in a block, at about 12 blocks per minute.</p>
+  <div class="example"><b>Example</b>A sensor reading is submitted at 12:00:00. It is in a block at about 12:00:06 and anyone can read it. From 12:05:10 on, it can no longer be undone by a fork.</div>
+  <h3>Catch-up after an outage</h3>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Node cut off for</th><th class="n">Catch-up time</th><th class="n">Data downloaded</th><th>Runs</th></tr></thead>
+    <tbody>
+      <tr><td>1 minute</td><td class="n">27 to 33 s</td><td class="n">about 1 MB</td><td>5 repeats, plus one first pass of 4.4 s</td></tr>
+      <tr><td>5 minutes</td><td class="n">13 to 143 s</td><td class="n">3.4 to 5.1 MB</td><td>13, 27, 136 and 143 s</td></tr>
+      <tr><td>15 minutes</td><td class="n">71 to 87 s</td><td class="n">11 to 13 MB</td><td>one run each at hop 1 and hop 2</td></tr>
+    </tbody></table></div>
+  <p>The catch-up time does not grow with the outage. The data does, at about 0.9 MB per minute of outage, and downloading it takes under a second. The time is a pause of the node before it reconnects. Our guess is that it is the node's own retry delay, which we did not confirm in the logs.</p>
+  <div class="example"><b>Example</b>A gateway loses its link for 5 minutes. When the link is back it needs between 13 s and 2.5 minutes to be up to date again, and it downloads about 4 MB.</div>
+  <h3>Pools stopped or cut off</h3>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Test (pool 3 unless noted)</th><th class="n">Chain during the test</th><th class="n">Pools agree again after</th></tr></thead>
+    <tbody>
+      <tr><td>stopped for 5 min</td><td class="n">about 10 blocks per minute (12 normal)</td><td class="n">58 s</td></tr>
+      <tr><td>pools 2 and 3 stopped for 5 min</td><td class="n">3.9 blocks per minute, a third</td><td class="n">109 s</td></tr>
+      <tr><td>cut off the network for 1 min</td><td class="n">pool 3 fell 1 block behind</td><td class="n">27 s</td></tr>
+      <tr><td>cut off for 3 min</td><td class="n">23 blocks apart</td><td class="n">66 s</td></tr>
+      <tr><td>cut off for 6 min</td><td class="n">29 blocks apart</td><td class="n">43 s</td></tr>
+      <tr><td>cut off for 15 min</td><td class="n">44 blocks apart</td><td class="n"><b>did not heal</b></td></tr>
+    </tbody></table></div>
+  <p>With one pool of three stopped the chain keeps going, and with two stopped it still runs at a third of the speed, as expected from the stake. A cut-off pool keeps forging its own short fork. When it comes back it drops its fork and follows the main chain, as long as its fork has fewer than 60 blocks (the security limit k). After 15 minutes the cut-off pool had made about 60 blocks of its own, so it could not go back. The real limit lies between 6 and 15 minutes; we did not test in between. The repair took 29 s: wipe the isolated pool's database and restart it, and it syncs from the others.</p>
+  <div class="example"><b>Example</b>An organisation's pool loses its connection for 3 minutes. The other two pools continue, and 66 s after the link is back the pool agrees with them again. After a loss of 15 minutes its operator must wipe the pool's database and resync, which takes under a minute.</div>
+  <span class="trust warn">▲ Rough · single runs; the block rates during the tests are noisy, and the boundary between 6 and 15 minutes is untested</span>
+  <div class="takeaway">The chain survives the loss of one pool, and even two, and heals within about two minutes after a short cut. A pool that stays isolated for about 15 minutes needs a manual resync.</div>
+</section>
+<section id="scale">
+  <h2>9 · Traffic, many nodes and wrong clocks</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>How much data does a node move in normal operation? What does it cost a pool when many nodes connect to it? What happens when a node's clock is wrong?</dd>
+    <dt>Why</dt><dd>A site on a mobile data plan needs the daily volume. A pool that serves many gateways needs to cope. Sensor sites often have clocks that drift.</dd>
+    <dt>Method</dt><dd>Traffic: the byte counters of each node's network card over 10 minutes, with the load off (empty blocks) and on (full blocks). Many nodes: 1, 4, 8 and 12 nodes dial pool 1 directly, 5 minutes each. Clock: one node gets its clock set wrong by 1 to 10 s, joins, and is watched for 2 minutes.</dd>
+  </dl>
+  <h3>Traffic</h3>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Load</th><th>Node</th><th class="n">Received per hour</th><th class="n">Sent per hour</th><th class="n">Received per day</th></tr></thead>
+    <tbody>
+      <tr><td>none (empty blocks)</td><td>any node</td><td class="n">2 to 3 MB</td><td class="n">0.3 to 4 MB</td><td class="n">0.03 to 0.07 GB</td></tr>
+      <tr><td>full blocks</td><td>hop 1</td><td class="n">45 MB</td><td class="n">45 MB</td><td class="n">1.06 GB</td></tr>
+      <tr><td>full blocks</td><td>hop 2</td><td class="n">45 MB</td><td class="n">0.5 MB</td><td class="n">1.05 GB</td></tr>
+      <tr><td>full blocks</td><td>pool 1</td><td class="n">38 MB</td><td class="n">155 MB</td><td class="n">0.9 GB</td></tr>
+    </tbody></table></div>
+  <p>A node receives about as much as the chain makes: 12 blocks of 64 KB per minute is 46 MB per hour, or about 1 GB per day at full capacity. A relay sends as much again to every node behind it, and a pool sends to each of its peers. With no load it is negligible.</p>
+  <div class="example"><b>Example</b>A site that reads the chain on a 10 GB monthly data plan would use about 30 GB per month at full capacity, which does not fit. At a tenth of the capacity it uses about 3 GB, which does.</div>
+  <h3>Many nodes on one pool</h3>
+  <figure>
+    <figcaption class="t">Block arrival against the number of nodes on one pool</figcaption>
+    <figcaption class="s">Milliseconds after the pool made the block. Median over all nodes, and the worst 95th percentile.</figcaption>
+    <div id="c-fan"></div>
+    <div class="example"><b>Example</b>One pool serves 12 gateways at once. The typical gateway has each block 28 ms after the pool made it, against 17 ms when it serves only one. In the slowest 5% of cases a block arrives after at most 48 ms.</div>
+  </figure>
+  <p>The pool's CPU use stayed at 3.3 to 3.6% from 1 to 12 nodes. What grows is its upload: from 154 MB per hour with one node to 569 MB per hour with 12, about 45 MB per hour for every node.</p>
+  <h3>A wrong clock</h3>
+  <figure>
+    <figcaption class="t">Share of the 2-minute watch in which the node was up to date</figcaption>
+    <figcaption class="s">A node counts as up to date when it is within 3 blocks of the pool. The node's clock is set wrong by the amount shown. Median of 3 runs, and the lowest of the 3.</figcaption>
+    <div id="c-skew"></div>
+    <div class="example"><b>Example</b>A sensor site's clock is 5 seconds behind. Its node connects but is dropped 8 to 11 times in 2 minutes, because new blocks look to be from the future, and it is up to date about 68% of the time. If the clock is 5 seconds ahead there is no problem at all.</div>
+  </figure>
+  <p>A node accepts a block only if its time is no more than 2 s in the future of the node's clock. A clock that is ahead causes no problem: in all three runs it behaved like a correct clock. A clock behind by 2 s or more makes the node drop the connection again and again, 6 to 13 times in the 2 minutes. It reconnects and catches up, so it is up to date for part of the time: in the median of three runs 86% at 2 s behind, 95% at 3 s, 68% at 5 s and 50% at 10 s. The runs differ a lot (at 10 s behind between 41% and 100%), so only the direction is firm: the further behind, the worse. The first sync took about 29 s in almost every run. The first attempt at this test did not restore the clock between the offsets, so its errors added up; we saw that in the node's own logs and repeated it twice with a proper restore. The logged header ages now match the offsets (worst case 2.5, 5.5 and 10.0 s). One run (2 s behind, third repetition) was interrupted by a 15-minute sleep of the Mac, and its first sync time is missing.</p>
+  <span class="trust warn">▲ Rough · the traffic and many-nodes numbers are solid; the clock results come from three runs per offset and vary between runs</span>
+  <div class="takeaway">A pool serves a dozen nodes without trouble. A sensor node with a clock that runs behind by more than 2 seconds is unreliable, so every site needs working time synchronisation.</div>
+</section>
+<section id="outsider">
+  <h2>10 · What does an outsider network do to ours?</h2>
+  <dl class="qa">
+    <dt>Question</dt><dd>If a node from a different Cardano network connects to one of our pools, who refuses it, how fast, and does the real chain notice?</dd>
+    <dt>Why</dt><dd>A sensor system needs to know whether a foreign or hostile node can disturb it. Two things can differ between networks: the genesis (the start of the chain) and the magic number.</dd>
+    <dt>Method</dt><dd>On a spare VM a rogue node with its own genesis, its own pool and its own keys forged its own chain and dialled pool 1 for 10 minutes. We measured 5 minutes before, 10 minutes with the rogue and 5 minutes after. Two cases were run: the same magic (42), and a different magic (43).</dd>
+  </dl>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Genesis</th><th>Magic</th><th>Handshake</th><th>Who rejects, and when</th><th>Reconnect</th><th>Effect on the real chain</th></tr></thead>
+    <tbody>
+      <tr><td>different</td><td>different (43)</td><td>refused: "version data mismatch"</td><td>refused at the handshake within 20 ms; the pool logged nothing</td><td>wait grows: 4, 10, 21, 38, 78, 161 s</td><td>none (12.0 → 12.1 → 12.6 blocks/min)</td></tr>
+      <tr><td>different</td><td>same (42)</td><td>accepted</td><td>the rogue's own chain sync fails 15 ms later, because the first real block does not fit its genesis</td><td>every 11–12 s, 27 attempts in 10 min</td><td>none (9.3 → 11.1 → 11.3 blocks/min); pool CPU stayed at 2–3%</td></tr>
+      <tr><td>same</td><td>different</td><td colspan="4">cannot be built: the magic is part of the genesis and its certificates are signed over it. A node with a changed magic refuses to start.</td></tr>
+      <tr><td>same</td><td>same</td><td colspan="4">an ordinary joiner (sections 1 to 7)</td></tr>
+    </tbody></table></div>
+  <p>The magic number is only a filter, not a password. A rogue with the right number connects, and every 12 seconds it tries again. What stops it is the chain itself: its first block does not match the real genesis. The pools never pulled the rogue's chain, because they only follow the peers in their own topology file. The first two attempts of the same-magic case failed with a clock-skew error. That was an artifact of the rogue's start-up timing, not the real rejection reason.</p>
+  <span class="trust warn">▲ Rough · one run per case and 5 to 10 minutes each; fork counts fluctuate (2 to 7 per window) and cannot be tied to the rogue</span>
+  <div class="takeaway">An outsider cannot make the pools adopt a foreign chain and cannot slow the real one. It can keep dialling. Pool 1 should only be reachable from the sites that need it.</div>
+</section>
+<section id="trust">
+  <h2>How far to trust the numbers</h2>
+  <p>Several problems appeared during the night. All were found and either fixed or marked.</p>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>What happened</th><th>Effect</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>The Mac went to sleep at about 02:00 and froze the VMs. Their clocks fell 45 minutes behind the Mac.</td><td>The chain survived only because the VMs' internet time sync had not stepped yet. A step forward of more than 15 minutes would have killed it.</td><td>Internet time sync was turned off on the VMs. One VM is now the only time source. <code>caffeinate</code> keeps the Mac awake.</td></tr>
+      <tr><td>The window for propagation samples used the VM clock while the logs used the Mac clock (45 minutes apart).</td><td>Propagation rows in the large-chain matrix mixed several delay settings. Medians at 0 ms were fine; tails were not.</td><td>Fixed in the scripts. The asymmetric-delay data was re-analysed from the saved logs. The 200 ms rows ran after the fix.</td></tr>
+      <tr><td>The firewall rule that exposes pool 1 to other VMs also rewrote the pools' own traffic. Pools 2 and 3 could no longer connect to pool 1.</td><td>Pool 1 forged alone for about 80 minutes and split from the others (block 538 against 580).</td><td>The rule now covers only addresses outside the emulation. The pools merged again within minutes. Documented in the troubleshooting file.</td></tr>
+      <tr><td>The 2000 ms fork phase ran while pool 1 was cut off.</td><td>That row is not valid.</td><td>Marked "do not use".</td></tr>
+      <tr><td>The first run of the clock skew test did not restore the node's clock between the offsets.</td><td>The wrong clocks added up (about 1, 3, 6, 11, 21 and 16 s instead of 1, 2, 3, 5, 10 and +5).</td><td>Found in the node's own logs. The test script now steps the clock back and checks it. The test was repeated twice more; section 9 uses the three repeats. One of them overlapped a 15-minute sleep of the Mac (the 12-hour <code>caffeinate</code> had run out), which only cost one sync time.</td></tr>
+      <tr><td>In the failure tests the chain rate before each test, taken over 60 s, ranged from 5 to 20 blocks per minute.</td><td>The "before" rates in the summary file are not reliable.</td><td>This page quotes only the heal times and the rates during the outage.</td></tr>
+      <tr><td>One fibre hop-2 join took 97 s instead of 47 s.</td><td>Other work (a test on a spare VM) used the same Mac.</td><td>The clean repetition is reported. Do not run other work during a measurement.</td></tr>
+    </tbody></table></div>
+  <p>Limits that apply to everything: all machines are VMs on one Mac, so CPU and disk are shared. Delay and loss are emulated on the sender side only. The chain is small and the pools are few. The "synced" test (newest block less than 20 s old) adds noise of up to 20 s when blocks come every 20 s, so the mainnet-like join times are only a baseline.</p>
+</section>
+<section id="hyp">
+  <h2>What we think but did not prove</h2>
+  <p>The numbers are measured. These explanations of them are not.</p>
+  <div class="glossary">
+    <div><b>Why a full block costs 3 times the delay.</b> A 60 KB block needs several TCP round trips (slow start). We did not test it apart from the block size.</div>
+    <div><b>Why block arrival depends on block size, not on block rhythm.</b> The mainnet-like chain, with nearly empty blocks, behaved like the testnet with empty blocks. Block size was never changed alone.</div>
+    <div><b>Why joins stop speeding up near 20 MB/s.</b> We suspect the VM's CPU or disk. Not tested.</div>
+    <div><b>Why hop 2 did not finish with 100 ms and 1% loss.</b> We expect TCP to slow down on a lossy link that carries bulk data. Not tested apart.</div>
+    <div><b>Why catch-up after an outage varies from 13 s to 143 s.</b> We think it is the node's own pause before it reconnects. Not confirmed in the logs.</div>
+    <div><b>Why a full waiting room does not lose transactions.</b> The submit command seems to wait. We inferred it from the results.</div>
+    <div><b>Why three nodes joining together were 2.6 and 3.3 times slower in two checkpoints.</b> Unknown.</div>
+    <div><b>Where healing stops.</b> A cut of 6 minutes heals and one of 15 minutes does not. The limit in between, expected near 60 blocks of the isolated pool's own fork, was not tested.</div>
+  </div>
+</section>
+
+<section id="next">
+  <h2>What is still to measure</h2>
+  <p>Done since the first version of this report: more hops, finality, catch-up, failures, traffic, many nodes and clock skew (sections 3, 8 and 9). Open, in order of value for CyberTel:</p>
+  <div class="glossary">
+    <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
+    <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
+    <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
+    <div><b>Fee per reading</b> The transaction fee for each batch size, as a cost per reading. It is a calculation from the fee parameters.</div>
+    <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
+    <div><b>Dropped: fairness</b> Whether each pool forges blocks in proportion to its stake. The protocol does this by design, and equal stakes gave similar counts in the fork test (78, 83 and 88 blocks in 20 minutes).</div>
+    <div><b>Dropped: mainnet-like chain at full size</b> Filling it to hundreds of megabytes would take about a day. The join formula in section 1 covers large chains.</div>
+  </div>
+  <footer>
+    <p>Results and scripts are in the repository under <code>experiments/measure</code>, <code>experiments/saturation</code> and <code>experiments/outsider</code>. Nothing has been committed or pushed yet. Run folders: growth-20261030, forks-night1, saturation-night1, matrix-big-20261030-0407, matrix-200ms-20261030-0605, asymmetric-20261030-0407, profiles-20261030-0707, outsider-20261030-0819, the mainnet-20261030-0915 matrix, saturation and forks, and, from the second round, hops-main, finality-main, outage-main with its repeats, traffic-main, failures-main, fanout-main and skew-main2.</p>
+  </footer>
+</section>
+</div>
+
+<div class="tip" id="tip" role="status"></div>
+
+<script>
+/* Small chart helper: line and grouped-bar SVG charts that follow the page's theme tokens, with hover tooltips and a data table under each chart. */
+(function(){
+  const NS='http://www.w3.org/2000/svg';
+  const tip=document.getElementById('tip');
+  const el=(n,a,p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+  const fmt=(v,d)=>{if(v==null)return '–';const a=Math.abs(v);const dd=d!=null?d:(a>=100?0:a>=10?1:a>=1?1:2);return Number(v).toFixed(dd).replace(/\.0+$/,'');};
+  const nice=(max,n)=>{const raw=max/n,p=Math.pow(10,Math.floor(Math.log10(raw))),f=raw/p;const s=f<=1?1:f<=2?2:f<=2.5?2.5:f<=5?5:10;return s*p;};
+  function showTip(html,host,x,y){tip.innerHTML=html;tip.style.opacity=1;const r=host.getBoundingClientRect();const b=document.body.getBoundingClientRect();
+    let left=r.left+x+14,top=r.top+window.scrollY+y-10;tip.style.left=left+'px';tip.style.top=top+'px';
+    const tw=tip.offsetWidth;if(left+tw>window.innerWidth-8){tip.style.left=Math.max(8,r.left+x-tw-14)+'px';}}
+  const hideTip=()=>{tip.style.opacity=0;};
+
+  function chart(id,cfg){
+    const host=document.getElementById(id);
+    host.innerHTML='';
+    const legend=document.createElement('div');legend.className='legend';host.appendChild(legend);
+    cfg.series.forEach(s=>{const sp=document.createElement('span');sp.style.setProperty('--c','var(--'+(s.color||'s1')+')');
+      const i=document.createElement('i');i.className=cfg.type==='bar'?'box':((s.dash||s.ref)?'dash':'');sp.appendChild(i);sp.appendChild(document.createTextNode(s.name));legend.appendChild(sp);});
+    const plot=document.createElement('div');plot.className='plot';host.appendChild(plot);
+    const det=document.createElement('details');det.className='tbl';det.innerHTML='<summary>Show as table</summary>';host.appendChild(det);
+    det.appendChild(table(cfg));
+    let lastW=0;
+    function draw(){
+      const W=Math.round(plot.clientWidth||host.clientWidth);if(!W||W===lastW)return;lastW=W;
+      plot.innerHTML='';
+      const H=cfg.height||(W<520?300:340);
+      const m={l:(cfg.y.log?54:60),r:14,t:10,b:cfg.xTitle?50:36};
+      const iw=W-m.l-m.r,ih=H-m.t-m.b;
+      const svg=el('svg',{viewBox:'0 0 '+W+' '+H,height:H,role:'img','aria-label':cfg.aria||cfg.title||'chart'},plot);
+      svg.style.height=H+'px';
+      // scales
+      let ymin=cfg.y.min!=null?cfg.y.min:0,ymax=cfg.y.max,yticks=cfg.y.ticks;
+      let ys;
+      if(cfg.y.log){const l0=Math.log10(ymin),l1=Math.log10(ymax);ys=v=>m.t+ih-(Math.log10(Math.max(v,ymin))-l0)/(l1-l0)*ih;}
+      else{ys=v=>m.t+ih-(v-ymin)/(ymax-ymin)*ih;}
+      if(!yticks){const st=nice(ymax-ymin,5);yticks=[];for(let v=ymin;v<=ymax+1e-9;v+=st)yticks.push(+v.toFixed(6));}
+      yticks.forEach(v=>{const y=ys(v);el('line',{x1:m.l,x2:W-m.r,y1:y,y2:y,stroke:'var(--rule)','stroke-width':1,opacity:v===ymin?1:.7},svg);
+        const t=el('text',{x:m.l-8,y:y+4,class:'tick-y'},svg);t.textContent=(cfg.y.fmt||fmt)(v);});
+      (cfg.refs||[]).forEach(r=>{const y=ys(r.y);el('line',{x1:m.l,x2:W-m.r,y1:y,y2:y,stroke:'var(--ref)','stroke-width':1.5,'stroke-dasharray':'2 4'},svg);
+        const t=el('text',{x:W-m.r-2,y:y-6,'text-anchor':'end'},svg);t.textContent=r.label;});
+      let xs,xAt,cats;
+      if(cfg.type==='bar'){
+        cats=cfg.cats;const gw=iw/cats.length;xAt=i=>m.l+gw*(i+.5);
+        cats.forEach((c,i)=>{const t=el('text',{x:xAt(i),y:H-m.b+18,class:'tick-x'},svg);t.textContent=c;});
+        const ns=cfg.series.length,pad=Math.min(14,gw*.18),bw=Math.min(46,(gw-2*pad-(ns-1)*3)/ns);
+        cfg.series.forEach((s,si)=>{s.vals.forEach((v,i)=>{if(v==null)return;
+          const x=xAt(i)-(ns*bw+(ns-1)*3)/2+si*(bw+3),y=ys(v),h=m.t+ih-y;
+          const r=el('path',{d:'M'+x+','+(m.t+ih)+'V'+(y+Math.min(4,h))+'Q'+x+','+y+' '+(x+Math.min(4,bw/2))+','+y+'H'+(x+bw-Math.min(4,bw/2))+'Q'+(x+bw)+','+y+' '+(x+bw)+','+(y+Math.min(4,h))+'V'+(m.t+ih)+'Z',fill:'var(--'+(s.color||'s1')+')'},svg);
+          r.style.cursor='default';
+          const vt=el('text',{x:x+bw/2,y:y-5,'text-anchor':'middle'},svg);vt.style.fill='var(--ink2)';vt.style.fontSize='11.5px';vt.textContent=fmt(v);
+          const hit=el('rect',{x:x-2,y:m.t,width:bw+4,height:ih,fill:'transparent'},svg);
+          hit.addEventListener('pointermove',e=>{const b=plot.getBoundingClientRect();showTip('<b>'+cats[i]+'</b><div class="r"><span>'+s.name+'</span><span class="n">'+fmt(v)+(cfg.unit||'')+'</span></div>',plot,e.clientX-b.left,e.clientY-b.top);});
+          hit.addEventListener('pointerleave',hideTip);});});
+      }else{
+        const xmin=cfg.x.min,xmax=cfg.x.max;xs=v=>m.l+(v-xmin)/(xmax-xmin)*iw;
+        (cfg.x.ticks||[]).forEach(v=>{const t=el('text',{x:xs(v),y:H-m.b+18,class:'tick-x'},svg);t.textContent=(cfg.x.fmt||fmt)(v);});
+        const xvals=[...new Set(cfg.series.flatMap(s=>s.pts.map(p=>p[0])))].sort((a,b)=>a-b);
+        cfg.series.forEach(s=>{
+          const col='var(--'+(s.color||'s1')+')';
+          const pts=s.pts.slice().sort((a,b)=>a[0]-b[0]);
+          const d=pts.map((p,i)=>(i?'L':'M')+xs(p[0])+','+ys(p[1])).join('');
+          el('path',{d,fill:'none',stroke:s.ref?'var(--ref)':col,'stroke-width':2,'stroke-linejoin':'round','stroke-dasharray':s.dash?'6 4':(s.ref?'2 4':'none')},svg);
+          if(!s.ref)pts.forEach(p=>{el('circle',{cx:xs(p[0]),cy:ys(p[1]),r:4.5,fill:col,stroke:'var(--surface)','stroke-width':2},svg);});
+        });
+        const guide=el('line',{y1:m.t,y2:m.t+ih,stroke:'var(--ref)','stroke-width':1,opacity:0},svg);
+        const hit=el('rect',{x:m.l,y:m.t,width:iw,height:ih,fill:'transparent'},svg);
+        hit.addEventListener('pointermove',e=>{const b=plot.getBoundingClientRect();const px=e.clientX-b.left;
+          let best=xvals[0],bd=1e18;xvals.forEach(v=>{const dd=Math.abs(xs(v)-px);if(dd<bd){bd=dd;best=v;}});
+          guide.setAttribute('x1',xs(best));guide.setAttribute('x2',xs(best));guide.setAttribute('opacity',1);
+          let h='<b>'+(cfg.x.label?cfg.x.label+' ':'')+(cfg.x.fmt||fmt)(best)+(cfg.x.unit||'')+'</b>';
+          cfg.series.forEach(s=>{if(s.ref)return;const p=s.pts.find(q=>q[0]===best);if(p)h+='<div class="r"><span>'+s.name+'</span><span class="n">'+(cfg.y.fmt||fmt)(p[1])+(cfg.unit||'')+'</span></div>';});
+          showTip(h,plot,xs(best),e.clientY-b.top);});
+        hit.addEventListener('pointerleave',()=>{hideTip();guide.setAttribute('opacity',0);});
+      }
+      // axis titles
+      if(cfg.xTitle){const t=el('text',{x:m.l+iw/2,y:H-8,class:'axis-title','text-anchor':'middle'},svg);t.textContent=cfg.xTitle;}
+      if(cfg.y.label){const t=el('text',{x:-(m.t+ih/2),y:13,class:'axis-title','text-anchor':'middle',transform:'rotate(-90)'},svg);t.textContent=cfg.y.label;}
+    }
+    draw();
+    new ResizeObserver(draw).observe(host);
+  }
+  function table(cfg){
+    const t=document.createElement('table');const sc=document.createElement('div');sc.className='scroll';
+    let h='<thead><tr><th>'+(cfg.type==='bar'?(cfg.catTitle||'Group'):(cfg.x.label||'x'))+'</th>'+cfg.series.filter(s=>!s.ref).map(s=>'<th class="n">'+s.name+'</th>').join('')+'</tr></thead><tbody>';
+    if(cfg.type==='bar'){cfg.cats.forEach((c,i)=>{h+='<tr><td>'+c+'</td>'+cfg.series.map(s=>'<td class="n">'+fmt(s.vals[i])+'</td>').join('')+'</tr>';});}
+    else{const xv=[...new Set(cfg.series.flatMap(s=>s.pts.map(p=>p[0])))].sort((a,b)=>a-b);
+      xv.forEach(x=>{h+='<tr><td>'+(cfg.x.fmt||fmt)(x)+'</td>'+cfg.series.filter(s=>!s.ref).map(s=>{const p=s.pts.find(q=>q[0]===x);return '<td class="n">'+(p?(cfg.y.fmt||fmt)(p[1]):'–')+'</td>';}).join('')+'</tr>';});}
+    t.innerHTML=h+'</tbody>';sc.appendChild(t);return sc;
+  }
+
+  /* ---- data (all from the result folders named at the bottom of the page) ---- */
+  chart('c-growth',{type:'line',aria:'Join time against chain size',unit:' s',
+    x:{label:'chain',min:0,max:250,ticks:[0,50,100,150,200,250],unit:' MB'},y:{min:0,max:90,label:'seconds to join'},xTitle:'chain size at the pools (MB)',
+    series:[{name:'no added delay',color:'s1',pts:[[27.2,3.45],[46.4,4.35],[67.4,5.2],[90.1,6.05],[111.3,7.05],[131.9,7.85],[154.9,8.75],[175.4,9.55],[198.3,10.65],[217.9,11.05],[239.4,12.4]]},
+            {name:'100 ms delay',color:'s2',dash:true,pts:[[27.2,13.35],[46.4,19.75],[67.4,25.9],[90.1,34],[111.3,39.95],[131.9,46.65],[154.9,53.85],[175.4,60.1],[198.3,68.85],[217.9,73.55],[239.4,81.15]]}]});
+
+  chart('c-joindelay',{type:'line',aria:'Join time against link delay',unit:' s',
+    x:{label:'delay',min:0,max:500,ticks:[0,100,200,300,400,500],unit:' ms'},y:{min:0,max:500,label:'seconds to join'},xTitle:'delay added on the joiner (ms)',
+    series:[{name:'hop 1, large chain',color:'s1',pts:[[0,16.4],[100,109.8],[200,256]]},{name:'hop 2, large chain',color:'s2',pts:[[0,16.9],[100,211.1],[200,479.6]]},
+            {name:'hop 1, small chain',color:'s1',dash:true,pts:[[0,1.0],[50,2.4],[100,2.9],[200,4.6],[500,9.6]]},{name:'hop 2, small chain',color:'s2',dash:true,pts:[[0,1.0],[50,2.1],[100,3.5],[200,6.4],[500,16.4]]}]});
+
+  chart('c-prop',{type:'line',aria:'Block arrival time against link delay',unit:' ms',
+    x:{label:'delay',min:0,max:500,ticks:[0,100,200,300,400,500],unit:' ms'},y:{min:0,max:2200,ticks:[0,500,1000,1500,2000],label:'milliseconds behind the forging pool'},xTitle:'delay added on the joiners (ms)',
+    series:[{name:'hop 1, full blocks',color:'s1',pts:[[0,13],[100,323],[200,608]]},{name:'hop 2, full blocks',color:'s2',pts:[[0,18],[100,1034],[200,2013]]},
+            {name:'hop 1, empty blocks',color:'s1',dash:true,pts:[[0,9],[50,59],[100,107],[200,210],[500,509]]},{name:'hop 2, empty blocks',color:'s2',dash:true,pts:[[0,18],[50,217],[100,412],[200,819],[500,2021]]}]});
+
+  chart('c-asym',{type:'bar',aria:'Median block arrival time with delay on one link or both',unit:' ms',catTitle:'delay hop 1 / hop 2 (ms)',
+    cats:['100 / 0','0 / 100','100 / 100','200 / 0','0 / 200'],y:{min:0,max:1600,ticks:[0,400,800,1200,1600],label:'median ms behind the pool'},xTitle:'delay on hop 1 / delay on hop 2 (ms)',
+    series:[{name:'hop 1 node',color:'s1',vals:[322,18,323,617,17]},{name:'hop 2 node',color:'s2',vals:[730,330,1034,1427,624]}]});
+
+  chart('c-mempool',{type:'line',aria:'Seconds until the pool mempool holds the transaction',unit:' s',
+    x:{label:'delay',min:0,max:500,ticks:[0,100,200,300,400,500],unit:' ms'},y:{min:0,max:3,ticks:[0,1,2,3],label:'seconds'},xTitle:'delay added on the node (ms)',
+    series:[{name:'hop 1 node',color:'s1',pts:[[0,0.04],[100,0.24],[200,0.44],[500,1.04]]},{name:'hop 2 node',color:'s2',pts:[[0,0.05],[100,0.54],[200,1.04],[500,2.54]]}]});
+
+  chart('c-forks',{type:'line',aria:'Share of forged blocks that were orphaned against pool delay',unit:' %',
+    x:{label:'pool delay',min:0,max:1000,ticks:[0,200,400,600,800,1000],unit:' ms'},y:{min:0,max:30,ticks:[0,10,20,30],label:'% of forged blocks lost',fmt:v=>fmt(v)},xTitle:'delay between the pools (ms)',
+    series:[{name:'testnet, 5 s blocks',color:'s1',pts:[[0,6.4],[100,7.1],[300,22.1],[600,27.0]]},{name:'mainnet-like, 20 s blocks',color:'s2',pts:[[0,0],[500,6.4],[1000,13.0]]}]});
+
+  chart('c-sat',{type:'line',aria:'Readings stored per second against readings offered',unit:' readings/s',
+    x:{label:'offered',min:0,max:350,ticks:[0,50,100,150,200,250,300,350],unit:' readings/s'},y:{min:0,max:350,ticks:[0,100,200,300],label:'readings stored per second'},xTitle:'readings offered per second',
+    series:[{name:'all stored',ref:true,pts:[[0,0],[350,350]]},
+      {name:'1 reading per tx',color:'s3',pts:[[2,1.9],[5,4.9],[10,9.9],[20,19.9]]},
+      {name:'10 per tx',color:'s4',pts:[[20.1,19.5],[50.1,49.8],[100.1,94.8],[150.1,148.1]]},
+      {name:'100 per tx',color:'s1',pts:[[100.8,100],[200.8,196.7],[247.6,210],[276.9,262.5],[291.4,274.2]]},
+      {name:'300 per tx',color:'s2',pts:[[152.5,150],[302.4,287.5],[304.9,332.5],[325.4,302.5]]}]});
+
+  chart('c-lat',{type:'line',aria:'Waiting time against attempted readings per second, logarithmic',unit:' s',
+    x:{label:'attempted',min:0,max:650,ticks:[0,100,200,300,400,500,600],unit:' readings/s'},y:{min:1,max:300,log:true,ticks:[1,3,10,30,100,300],label:'seconds (log scale)'},xTitle:'readings per second the generator tried to send',
+    series:[{name:'100 per tx, median',color:'s1',pts:[[100,3.14],[200,4.68],[300,9.13],[400,29.7],[600,102.97]]},{name:'100 per tx, p90',color:'s1',dash:true,pts:[[100,8.81],[200,10.82],[300,18.33],[400,57.42],[600,165.5]]},
+            {name:'300 per tx, median',color:'s2',pts:[[150,3.83],[300,13.24],[450,26.73],[600,43.64]]},{name:'300 per tx, p90',color:'s2',dash:true,pts:[[150,7.96],[300,20.27],[450,50.34],[600,117.91]]}]});
+
+  chart('c-sat2',{type:'bar',aria:'Best readings per second with both parameter sets',unit:' readings/s',catTitle:'readings per transaction',
+    cats:['100 per tx','300 per tx'],y:{min:0,max:400,ticks:[0,100,200,300,400],label:'readings stored per second'},
+    series:[{name:'testnet, 5 s blocks',color:'s1',vals:[274,333]},{name:'mainnet-like, 20 s blocks',color:'s2',vals:[117,120]}]});
+
+  chart('c-hops',{type:'line',aria:'Block arrival time against hop number',unit:' ms',
+    x:{label:'hop',min:1,max:6,ticks:[1,2,3,4,5,6],fmt:v=>String(v)},y:{min:0,max:4200,ticks:[0,1000,2000,3000,4000],label:'ms after the pool made the block'},xTitle:'number of hops from the pool',
+    series:[{name:'100 ms per link',color:'s1',pts:[[1,316],[2,1022],[3,1733],[4,2443],[5,3154],[6,3871]]},{name:'50 ms per link',color:'s2',pts:[[1,166],[2,523],[3,882],[4,1242],[5,1609],[6,1972]]},{name:'no added delay',color:'s3',pts:[[1,18],[2,24],[3,31],[4,35],[5,38],[6,46]]}]});
+
+  chart('c-hopjoin',{type:'line',aria:'Join time against hop number',unit:' s',
+    x:{label:'hop',min:1,max:6,ticks:[1,2,3,4,5,6],fmt:v=>String(v)},y:{min:0,max:450,ticks:[0,100,200,300,400],label:'seconds to join'},xTitle:'hop at which the node joins',
+    series:[{name:'100 ms per link',color:'s1',pts:[[1,198.8],[2,383.4],[3,386.3],[4,380.3],[5,383.1],[6,377.3]]},{name:'50 ms per link',color:'s2',pts:[[1,103.6],[2,194.4],[3,196.5],[4,196.0],[5,196.3],[6,197.2]]},{name:'no added delay',color:'s3',pts:[[1,28.0],[2,28.6],[3,29.6],[4,27.9],[5,26.9],[6,27.0]]}]});
+
+  chart('c-fan',{type:'line',aria:'Block arrival time against the number of nodes on one pool',unit:' ms',
+    x:{label:'nodes',min:0,max:12,ticks:[0,4,8,12],fmt:v=>String(v)},y:{min:0,max:60,ticks:[0,20,40,60],label:'ms after the pool made the block'},xTitle:'nodes connected to pool 1',
+    series:[{name:'median over all nodes',color:'s1',pts:[[1,17],[4,18],[8,26],[12,28]]},{name:'worst 95th percentile',color:'s2',dash:true,pts:[[1,33],[4,38],[8,42],[12,48]]}]});
+
+  chart('c-skew',{type:'bar',aria:'Share of the watch in which a node with a wrong clock was up to date',unit:' %',catTitle:'clock of the node',
+    cats:['1 s behind','2 s behind','3 s behind','5 s behind','10 s behind','5 s ahead'],y:{min:0,max:100,ticks:[0,25,50,75,100],label:'% of the 2-minute watch in sync'},
+    series:[{name:'median of 3 runs',color:'s1',vals:[100,86,95,68,50,100]},{name:'lowest of the 3 runs',color:'s2',vals:[100,86,77,64,41,100]}]});
+
+  chart('c-prof',{type:'bar',aria:'Join time at hop 1 for five link profiles',unit:' s',catTitle:'profile',
+    cats:['Fibre','Cable','4G','Rural DSL','Satellite'],y:{min:0,max:900,ticks:[0,300,600,900],label:'seconds to join'},
+    series:[{name:'measured',color:'s1',vals:[43,82,199,783,593]},{name:'download cap only (0.5 GB ÷ speed)',color:'s3',vals:[40,80,200,800,160]}]});
+})();
+</script>

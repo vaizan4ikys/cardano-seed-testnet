@@ -1,0 +1,6 @@
+# 26 blocks in 511 s = 2.9 blocks/min
+delay 0 ms, loss 0 %: # 26 blocks in 511 s = 2.9 blocks/min
+# 27 blocks in 456 s = 3.4 blocks/min
+delay 200 ms, loss 0 %: # 27 blocks in 456 s = 3.4 blocks/min
+# 26 blocks in 664 s = 2.3 blocks/min
+delay 500 ms, loss 0 %: # 26 blocks in 664 s = 2.3 blocks/min

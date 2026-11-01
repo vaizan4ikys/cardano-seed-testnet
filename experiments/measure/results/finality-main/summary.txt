@@ -1,0 +1,1 @@
+# 12 transactions: in a block after 6.1 s, final after 310.6 s on average (304.5 s after inclusion)

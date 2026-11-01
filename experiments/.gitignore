@@ -1,0 +1,9 @@
+# Results: keep the small summary files (CSV, TXT, MD) of every run, not its raw logs (several GB).
+**/results/**/logs/
+**/results/*/*.log
+**/results/*/cp-*/
+**/results/*/.*
+**/results/smoke*/
+**/results/aborted-*/
+# the rogue-node and pool logs of the outsider runs are small and are the evidence: keep them
+!**/outsider/results/*/*.log

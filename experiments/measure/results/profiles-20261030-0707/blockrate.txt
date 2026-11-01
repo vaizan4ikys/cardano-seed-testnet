@@ -1,0 +1,10 @@
+# 70 blocks in 262 s = 15.8 blocks/min
+fibre: # 70 blocks in 262 s = 15.8 blocks/min
+# 61 blocks in 258 s = 14.0 blocks/min
+cable: # 61 blocks in 258 s = 14.0 blocks/min
+# 57 blocks in 237 s = 14.2 blocks/min
+mobile4g: # 57 blocks in 237 s = 14.2 blocks/min
+# 51 blocks in 248 s = 12.1 blocks/min
+rural-dsl: # 51 blocks in 248 s = 12.1 blocks/min
+# 64 blocks in 231 s = 16.4 blocks/min
+satellite: # 64 blocks in 231 s = 16.4 blocks/min
