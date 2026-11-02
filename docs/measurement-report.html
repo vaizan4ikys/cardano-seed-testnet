@@ -67,6 +67,13 @@ figcaption.s{font-size:13px;color:var(--muted);margin:0 0 10px;max-width:70ch}
 .plot .tick-x{text-anchor:middle}.plot .tick-y{text-anchor:end}
 .tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:12.5px;line-height:1.45;padding:7px 10px;border-radius:5px;white-space:nowrap;z-index:5;opacity:0;transition:opacity .08s}
 .tip b{font-weight:600}.tip .r{display:flex;gap:8px;justify-content:space-between}.tip .n{font-family:var(--mono)}
+details.fold{margin:16px 0;border:1px solid var(--rule);border-radius:6px;padding:0 14px;background:var(--surface)}
+details.fold>summary{cursor:pointer;font:600 15px/1.4 var(--sans);padding:10px 0;color:var(--ink)}
+details.fold[open]>summary{border-bottom:1px solid var(--rule);margin-bottom:10px}
+details.fold>.card-table,details.fold>.glossary{margin-bottom:12px}
+details.method{margin:-12px 0 18px;font-size:14px;color:var(--ink2);max-width:72ch}
+details.method summary{cursor:pointer;color:var(--accent-ink);padding:2px 0;font-size:13px}
+details.method p{margin:6px 0 4px}
 details.tbl{margin-top:6px;font-size:13px}
 details.tbl summary{cursor:pointer;color:var(--accent-ink);padding:4px 0}
 .scroll{overflow-x:auto}
@@ -187,7 +194,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>3 · One chain spread over several VMs</td><td>Nodes of the same chain on three VMs, up to 6 nodes in a row. The three block-producing pools stayed together on one VM, so a chain with pools on different VMs was not tested.</td><td>3, 9</td></tr>
       <tr><td>4 · Four VMs, to check the hops</td><td>Pool VM plus three joiner VMs, nodes chained one behind the other (up to 6 nodes with two per VM). Block arrival, join time and transaction time per hop, and the load of every machine.</td><td>3, 10</td></tr>
     </tbody></table></div>
-  <h3>Conditions of each experiment</h3>
+  <details class="fold"><summary>Conditions of each experiment (chain, load, number of runs)</summary>
   <div class="card-table scroll"><table>
     <thead><tr><th>Section</th><th>Chain</th><th>Load</th><th>Runs</th></tr></thead>
     <tbody>
@@ -204,9 +211,10 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>10 · Machines</td><td>testnet</td><td>on</td><td>CPU and memory once a minute in 4 runs</td></tr>
       <tr><td>11 · Outsiders</td><td>testnet</td><td>off</td><td>1 run per case</td></tr>
     </tbody></table></div>
+  </details>
 </section>
 <section id="words">
-  <h2>Words used</h2>
+  <details class="fold"><summary>Words used (glossary)</summary>
   <div class="glossary">
     <div><b>Block</b> A batch of transactions that one pool adds to the chain. Everyone then agrees it exists.</div>
     <div><b>Reading</b> One sensor measurement. In the tests it is a 40-character text (42 bytes on the chain).</div>
@@ -220,14 +228,16 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>Delay</b> Milliseconds added to every packet a node sends. A delay of 100 ms adds 100 ms to the round trip.</div>
     <div><b>Magic</b> A number every node announces when it connects. Nodes with a different number refuse each other.</div>
   </div>
+  </details>
 </section>
 <section id="join">
   <h2>1 · How long does a new node need to join?</h2>
   <dl class="qa">
     <dt>Question</dt><dd>How does the time to join grow with the size of the chain, with link delay, and with packet loss?</dd>
     <dt>Why</dt><dd>A new site, or a node that crashed and lost its data, must catch up before it can serve anyone. This sets the recovery time.</dd>
-    <dt>Method</dt><dd>A fresh node with an empty database starts, dials a pool, and downloads the chain. The timer stops when its newest block is less than 20 s old. A transaction load kept the blocks about 91% full while the chain grew for 6 hours (12 checkpoints, one every 30 min).</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>A fresh node with an empty database starts, dials a pool, and downloads the chain. The timer stops when its newest block is less than 20 s old. A transaction load kept the blocks about 91% full while the chain grew for 6 hours (12 checkpoints, one every 30 min).</p></details>
 
   <figure>
     <figcaption class="t">Join time against chain size</figcaption>
@@ -235,7 +245,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-growth"></div>
     <div class="example"><b>Example</b>A new site joins when the chain has grown to about 150 MB. On a good local link it is up to date after about 9 s. If the site's link adds 100 ms, the same join takes about 54 s. At 240 MB the two times are 12 s and 81 s.</div>
   </figure>
-  <p>Without extra delay the join takes 3.5 s at 27 MB and 12.4 s at 239 MB. With 100 ms of delay it takes 13 s and 81 s, so the delay cost grows with the amount of data. Copy speed settles near 20 MB/s. We did not test what limits it; the VM's CPU or disk are the likely cause. Three nodes joining at the same time needed about 1.35 times as long as one (16.7 s against 12.4 s at the last checkpoint). Two checkpoints were 2.6 and 3.3 times slower; we did not find out why.</p>
+  <p>Without extra delay the join takes 3.5 s at 27 MB and 12.4 s at 239 MB; with 100 ms it takes 13 s and 81 s, so delay costs more as the chain grows. Copy speed levels off near 20 MB/s (cause untested, probably the VM's CPU or disk). Three nodes joining together needed about 1.35 times as long as one (16.7 s against 12.4 s at the last checkpoint); two checkpoints were 2.6 and 3.3 times slower, reason unknown.</p>
 
   <figure>
     <figcaption class="t">Join time against link delay, small and large chain</figcaption>
@@ -243,10 +253,10 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-joindelay"></div>
     <div class="example"><b>Example</b>A site joins the large chain (about 10,000 blocks) over a link that adds 100 ms. Connected straight to a pool (hop 1) it needs about 110 s. Connected through another node (hop 2) it needs about 211 s. At 200 ms the times are 256 s and 480 s (8 minutes). On the almost empty chain the same 200 ms cost only 5 to 6 s.</div>
   </figure>
-  <p>On the large chain every millisecond of delay costs about 1.3 s of join time at hop 1 and 2.4 s at hop 2 (256 s and 480 s at 200 ms). Section 3 shows that this doubling happens once, from hop 1 to hop 2, and does not grow with deeper hops. On the small chain the same millisecond cost 0.02 s. Delay punishes big chains, because the download needs many round trips.</p>
+  <details class="tbl"><summary>Delay and chain size: the numbers</summary><p>On the large chain each millisecond of delay costs about 1.3 s of join time at hop 1 and 2.4 s at hop 2 (256 s and 480 s at 200 ms). The doubling happens once, from hop 1 to hop 2, and does not grow with deeper hops (section 3). On the small chain a millisecond cost 0.02 s: delay punishes big chains because the download needs many round trips.</p></details>
 
   <h3>Packet loss</h3>
-  <p>One percent loss barely matters at 0 ms: 18.6 s against 16.4 s. At 100 ms plus 1% loss, hop 1 still took 121 s, but hop 2 did not finish within 900 s in either repetition. Hop 2 downloads over hop 1's lossy link, and TCP slows sharply when loss and delay meet on a link that carries bulk data. This is the expected TCP behaviour and was not tested further.</p>
+  <p>One percent loss barely matters at 0 ms (18.6 s against 16.4 s). At 100 ms plus 1% loss hop 1 took 121 s, but hop 2 did not finish within 900 s in either repetition. TCP slows sharply when loss and delay meet on a link that carries bulk data; this is expected and was not tested further.</p>
   <span class="trust good">● Solid · trend is clean over 12 checkpoints; the 3-node values are noisy (n = 2)</span>
   <div class="takeaway">A node that joins over a slow or lossy link needs minutes, not seconds. For distant sites a database snapshot is probably a better start than a full download.</div>
 </section>
@@ -255,8 +265,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>When a pool makes a block, how many milliseconds later does a node one or two hops away have it?</dd>
     <dt>Why</dt><dd>Slow travel means pools build on old blocks and create forks. It also bounds how fresh a reading can be at a remote site.</dd>
-    <dt>Method</dt><dd>Every node writes a millisecond timestamp when a block becomes its newest. The first node to log a block is the forger. The others' delay is their timestamp minus that one. The VM clocks were aligned to about 1 ms and measured again for every run.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>Every node writes a millisecond timestamp when a block becomes its newest. The first node to log a block is the forger. The others' delay is their timestamp minus that one. The VM clocks were aligned to about 1 ms and measured again for every run.</p></details>
 
   <figure>
     <figcaption class="t">Block arrival time against link delay</figcaption>
@@ -264,7 +275,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-prop"></div>
     <div class="example"><b>Example</b>A pool makes a full block (60 KB). A node connected straight to that pool over a link with 100 ms of delay has the block about 323 ms later. A second node behind the first one, also with 100 ms, has it after about 1.0 s. With empty blocks the same two links need 107 ms and 412 ms.</div>
   </figure>
-  <p>With almost empty blocks hop 1 sees a block after about 1 times the delay and hop 2 after about 4 times (100 ms gives 107 ms and 412 ms). With full blocks the factor at hop 1 rises to about 3 (323 ms at 100 ms, 608 ms at 200 ms), and hop 2 sees them after about 10 times the delay. A 60 KB block does not fit into one TCP window, so it needs several round trips. The mainnet-like chain, which also had nearly empty blocks, gave the same factors as the first testnet series (209/812 ms at 200 ms, 512/2021 ms at 500 ms). That points to block size, not block rhythm, as the cause. This explanation was not isolated in a separate test.</p>
+  <p>With almost empty blocks hop 1 sees a block after about 1 times the delay and hop 2 after about 4 times (100 ms gives 107 ms and 412 ms). With full blocks it is about 3 times at hop 1 (323 ms at 100 ms, 608 ms at 200 ms) and about 10 times at hop 2. A 60 KB block does not fit into one TCP window, so it needs several round trips (our explanation, not isolated in a test). The mainnet-like chain, also with nearly empty blocks, gave the same factors (209/812 ms at 200 ms, 512/2021 ms at 500 ms), which points to block size, not block rhythm.</p>
 
   <h3>Which link adds what?</h3>
   <p>Delay was put on one joiner at a time, with full blocks, 8 minutes per setting (about 100 blocks each).</p>
@@ -274,7 +285,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-asym"></div>
     <div class="example"><b>Example</b>Only hop 1's link is slow (100 ms). Hop 1 gets blocks after 322 ms. Hop 2 has a normal link and still gets them after 730 ms, because every block passes through hop 1. If only hop 2's link is slow, hop 1 stays at 18 ms and hop 2 gets the blocks after 330 ms.</div>
   </figure>
-  <p>A delay on a node's own link costs that node about 3.1 to 3.3 times the delay (322 ms for 100 ms, 617 ms for 200 ms). A delay on hop 1 adds about 4 more times the delay for hop 2. Delay on hop 2 does not hurt hop 1 (17 ms). With both links at 100 ms, hop 2 receives blocks after 1034 ms. The effects add up and double when the delay doubles.</p>
+  <details class="tbl"><summary>Which link adds what: the numbers</summary><p>A delay on a node's own link costs that node about 3.1 to 3.3 times the delay (322 ms at 100 ms, 617 ms at 200 ms). A delay on hop 1 adds about 4 times the delay more for hop 2. Delay on hop 2 does not hurt hop 1 (17 ms). With both links at 100 ms hop 2 gets blocks after 1034 ms: the effects add up.</p></details>
   <span class="trust good">● Solid · windows fixed and re-analysed; hop-1 and hop-2 results agree between runs</span>
   <div class="takeaway">In a chain of relays, delay accumulates over every hop and a full block pays three to four times each delay. Pools should sit close to each other, and sensor gateways should dial a pool directly.</div>
 </section>
@@ -283,25 +294,26 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>In a chain of up to 6 nodes, each one connected to the previous, how do block arrival, join time and transaction time grow with the number of hops?</dd>
     <dt>Why</dt><dd>Section 2 measured only 1 and 2 hops, so it could not say whether the cost per hop stays the same. Sensor sites will often reach the chain through relays.</dd>
-    <dt>Method</dt><dd>Six nodes in a chain on the three joiner VMs (two nodes per VM). Node k dials node k-1, and node 1 dials a pool. Every node has the delay on what it sends, so beyond the first link the delay acts in both directions of a link. Delays of 0, 50 and 100 ms, full blocks, 7 minutes of samples per delay. The chain had grown to about 90 to 100 MB.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>Six nodes in a chain on the three joiner VMs (two nodes per VM). Node k dials node k-1, and node 1 dials a pool. Every node has the delay on what it sends, so beyond the first link the delay acts in both directions of a link. Delays of 0, 50 and 100 ms, full blocks, 7 minutes of samples per delay. The chain had grown to about 90 to 100 MB.</p></details>
   <figure>
     <figcaption class="t">Block arrival time against hop number</figcaption>
     <figcaption class="s">Median milliseconds after the pool made the block, at the node that is k hops away. Full blocks. One line per delay.</figcaption>
     <div id="c-hops"></div>
     <div class="example"><b>Example</b>A site is 6 relays away from the pool and every link adds 100 ms. It has each block about 3.9 s after the pool made it. With 50 ms per link it needs about 2 s, and with no added delay 46 ms.</div>
   </figure>
-  <p>The lines are straight. The first hop costs about 3.2 times the delay, and every further hop adds about 7.1 times the delay: at 100 ms, 316 ms for hop 1, then 711 ms more per hop, which gives 3,871 ms at hop 6 (316 + 5 × 711). At 50 ms the steps are 360 ms. With no added delay each hop adds about 6 ms of processing. This confirms the guess in section 2 for hop 3 and beyond. A relay adds a request and a download, each carrying the delay, and a full 60 KB block needs several round trips.</p>
+  <p>The lines are straight. The first hop costs about 3.2 times the delay and every further hop about 7.1 times: at 100 ms, 316 ms for hop 1, then 711 ms more per hop, which gives 3,871 ms at hop 6 (316 + 5 × 711); at 50 ms the steps are 360 ms. With no added delay each hop adds about 6 ms. A relay adds a request and a download, each carrying the delay.</p>
   <figure>
     <figcaption class="t">Join time against hop number</figcaption>
     <figcaption class="s">Seconds until a new node, joining from the previous node in the chain, is up to date. Median of 3 repetitions on a chain of 627 MB.</figcaption>
     <div id="c-hopjoin"></div>
     <div class="example"><b>Example</b>With 100 ms on every link, a node joining at hop 1 needs about 199 s (3.3 minutes) and a node joining at hop 6 needs about 377 s (6.3 minutes). A node at hop 2 needs the same 383 s as one at hop 6. With no added delay every join takes about 28 s.</div>
   </figure>
-  <p>Join time does not grow with depth. A node only talks to the node it joins from, so only that one link counts. Hop 1 needs about half as long as the others because the pool's side of that link has no added delay. Each value is the median of three repetitions on a chain of 627 MB. The repetitions agree within 3% (one hop-3 run at 100 ms took 397 s against 380 and 386 s), and there is no outlier in these 54 joins. An earlier run on a chain of 100 MB showed the same pattern (32 s at hop 1, about 61 s from hop 2 on), plus one join at hop 5 that took 35 s, probably a reconnection pause; we repeated the series because of it.</p>
-  <p>The formula from section 1 fits well when the size is the data actually received: 2 s + MB × (0.042 + 0.0029 × delay in ms). For 627 MB it gives 28 s at no delay (measured 28 s), and from hop 2 on, where the delay part is doubled, 392 s at 100 ms (measured 383 s) and 210 s at 50 ms (measured 194 s).</p>
-  <p>The nodes received 79 MB at block 1,491, 100 MB at block 1,834 and 627 MB at block 10,700, about 53 to 59 KB per block. That settles the earlier estimate of about 0.5 GB for a chain of 10,700 blocks: it is a little more, 0.6 GB.</p>
-  <p>A transaction needs about 3 times the delay per hop to reach the pool's waiting room: 0.04 s at no delay, and at hop 6 about 0.9 s (50 ms) and 1.8 s (100 ms). The time until the block is too noisy to quote.</p>
+  <details class="tbl"><summary>Join time against depth: details</summary><p>Join time does not grow with depth: a node talks only to the node it joins from, so only that link counts. Hop 1 needs about half as long because the pool's side of that link has no added delay. Each value is the median of three repetitions on a chain of 627 MB; they agree within 3% (one hop-3 run at 100 ms took 397 s against 380 and 386 s), with no outlier in 54 joins. An earlier run on a 100 MB chain showed the same pattern (32 s at hop 1, about 61 s from hop 2 on), plus one 35 s join at hop 5, probably a reconnection pause.</p></details>
+  <details class="tbl"><summary>The join-time formula</summary><p>The formula from section 1 fits when the size is the data actually received: 2 s + MB × (0.042 + 0.0029 × delay in ms). For 627 MB it gives 28 s at no delay (measured 28 s), and from hop 2 on, where the delay part is doubled, 392 s at 100 ms (measured 383 s) and 210 s at 50 ms (measured 194 s).</p></details>
+  <details class="tbl"><summary>How much data a join receives</summary><p>The nodes received 79 MB at block 1,491, 100 MB at block 1,834 and 627 MB at block 10,700, about 53 to 59 KB per block: a chain of 10,700 blocks is about 0.6 GB.</p></details>
+  <details class="tbl"><summary>Transactions through many hops</summary><p>A transaction needs about 3 times the delay per hop to reach the pool's waiting room: 0.04 s at no delay, and at hop 6 about 0.9 s (50 ms) and 1.8 s (100 ms). The time until the block is too noisy to quote.</p></details>
   <span class="trust good">● Solid · straight lines for 3 delays and 6 hops; the join times are the median of 3 repetitions</span>
   <div class="takeaway">Every relay between a site and the pool adds about 7 times the link delay to block arrival. A site should be as few hops from a pool as possible. Joining a new node costs the same at any depth.</div>
 </section>
@@ -310,8 +322,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How long does a transaction take to reach the pool's waiting room, and how long until it is in a block?</dd>
     <dt>Why</dt><dd>This is the delay between a sensor reading and the moment it is stored.</dd>
-    <dt>Method</dt><dd>A node submits one metadata transaction. We time (a) the moment the pool's mempool holds it and (b) the moment the node sees it in a block. Six to ten transactions per setting. The transaction is built and signed on the pool machine, because the funded key is there, and only submitted at the node on the VM. So the building and signing time, and the link from a sensor to its node, are not in these times.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>A node submits one metadata transaction. We time (a) the moment the pool's mempool holds it and (b) the moment the node sees it in a block. Six to ten transactions per setting. The transaction is built and signed on the pool machine, because the funded key is there, and only submitted at the node on the VM. So the building and signing time, and the link from a sensor to its node, are not in these times.</p></details>
   <figure>
     <figcaption class="t">Time until the pool's mempool holds the transaction</figcaption>
     <figcaption class="s">Median seconds against link delay. Only the network is in play here; no waiting for a block.</figcaption>
@@ -329,7 +342,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>Mainnet-like</td><td>200 ms</td><td class="n">7.2</td><td class="n">7.3</td></tr>
       <tr><td>Mainnet-like</td><td>500 ms</td><td class="n">20.5</td><td class="n">17.0</td></tr>
     </tbody></table></div>
-  <p>The network part is small: 0.04 s at 0 ms and about 1 s (hop 1) or 2.5 s (hop 2) at 500 ms. The rest is waiting for the next block. A transaction that arrives right after a block waits a full block interval, so the typical wait is about 4 s with 5-second blocks and 13 s with 20-second blocks (median over all 36 mainnet-like transactions, worst case 93 s). Each cell has only 6 to 10 transactions, so differences between rows of a few seconds are noise.</p>
+  <p>The network part is small: 0.04 s at 0 ms and about 1 s (hop 1) or 2.5 s (hop 2) at 500 ms. The rest is waiting for the next block: typically about 4 s with 5-second blocks and 13 s with 20-second blocks (median of all 36 mainnet-like transactions, worst case 93 s). Each cell has only 6 to 10 transactions, so differences of a few seconds are noise.</p>
   <span class="trust warn">▲ Rough · the mempool times are consistent; the block times are noisy</span>
   <div class="takeaway">Storing a reading takes roughly one block interval plus up to a second of network. Making blocks faster is the only way to make storage faster.</div>
 </section>
@@ -338,15 +351,16 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How many blocks are lost to forks as the delay between the pools grows?</dd>
     <dt>Why</dt><dd>Each orphaned block is wasted work and shows that pools disagree for a moment. If the pools were in different cities, this tells us how far apart they may be.</dd>
-    <dt>Method</dt><dd>Delay was added to all three pools' own traffic. For each delay we counted for 20 minutes (testnet) or 30 minutes (mainnet-like), with the transaction load running: blocks forged by the pools against blocks that ended up on the chain. The difference is the orphans.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>Delay was added to all three pools' own traffic. For each delay we counted for 20 minutes (testnet) or 30 minutes (mainnet-like), with the transaction load running: blocks forged by the pools against blocks that ended up on the chain. The difference is the orphans.</p></details>
   <figure>
     <figcaption class="t">Share of forged blocks that were lost</figcaption>
     <figcaption class="s">Orphaned blocks as a percentage of all blocks forged, against the delay between the pools.</figcaption>
     <div id="c-forks"></div>
     <div class="example"><b>Example</b>The pools are 300 ms apart on the 5-second testnet. Of 100 blocks the pools make, about 22 are lost, because a pool made its block before the previous one reached it. On the 20-second mainnet-like chain, even 500 ms apart loses only about 6 of 100.</div>
   </figure>
-  <p>On the testnet, 6% of the blocks are lost even without extra delay, because two pools are sometimes elected in the same second. Up to 100 ms nothing changes. At 300 ms 22% are lost and at 600 ms 27%, and the chain grows from 11.6 to 8.5 blocks per minute. On the mainnet-like chain, 20-second blocks tolerate much more: no orphans at 0 ms, 6% at 500 ms and 13% at 1000 ms. The block rate fell to 90% and 68% of its starting value.</p>
+  <p>On the testnet 6% of the blocks are lost even without extra delay, because two pools are sometimes elected in the same second. Up to 100 ms nothing changes; at 300 ms 22% are lost and at 600 ms 27%, and the chain slows from 11.6 to 8.5 blocks per minute. The mainnet-like chain tolerates more: no orphans at 0 ms, 6% at 500 ms, 13% at 1000 ms, with the block rate down to 90% and 68%.</p>
   <span class="trust good">● Solid for the testnet and for 0–1000 ms on the mainnet-like chain</span>
   <span class="trust bad">✕ Do not use · mainnet-like, 2000 ms: pool 1 lost its connections to the others and forged alone for about 80 minutes (see Trust)</span>
   <div class="takeaway">With 5-second blocks, pools should stay below about 100 ms from each other. With 20-second blocks, 500 ms is acceptable. Many city pairs inside Europe are less than 50 ms apart.</div>
@@ -356,8 +370,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>Where is the limit, and how does waiting time behave when we get close to it?</dd>
     <dt>Why</dt><dd>It tells how many sensors one network can serve and how much batching is needed. At 100 readings/s the chain serves about 6,000 sensors that report once a minute.</dd>
-    <dt>Method</dt><dd>From inside pool 1, transactions of 1, 10, 100 or 300 readings were submitted at a fixed rate for 2 minutes per step. Each transaction was timed from its planned send time to the block that holds it. The load was stopped during this test.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>From inside pool 1, transactions of 1, 10, 100 or 300 readings were submitted at a fixed rate for 2 minutes per step. Each transaction was timed from its planned send time to the block that holds it. The load was stopped during this test.</p></details>
   <div class="card-table scroll"><table>
     <thead><tr><th class="n">Readings per transaction</th><th class="n">Transaction size</th><th class="n">Transactions per block</th><th class="n">Readings per block</th><th class="n">Readings per second</th></tr></thead>
     <tbody>
@@ -373,14 +388,14 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-sat"></div>
     <div class="example"><b>Example</b>Each transaction carries 100 readings. The generator offers 200 readings per second (2 transactions per second) and the chain stores 197 per second, almost all of it. The generator offers 290 per second: the chain stores 274 and the rest waits in the queue.</div>
   </figure>
-  <p>The limit is about 300 readings/s, which fits the calculation: five 300-reading transactions per block, about twelve blocks per minute, 307 readings/s. Batches of 1 and 10 readings reached only 20 and 148 readings/s because the test program (one <code>cardano-cli</code> process per transaction) could not send faster. The node itself could have taken about 47 small transactions per second. No transaction was lost and none was rejected. When the node's waiting room is full (129 KB), the submit command waits instead of failing. The 15-minute overload test below confirms it: submits waited up to 331 s and none was refused.</p>
+  <p>The limit is about 300 readings/s, as calculated: five 300-reading transactions per block, about twelve blocks per minute, 307 readings/s. Batches of 1 and 10 readings reached only 20 and 148 readings/s because the test program (one cardano-cli process per transaction) could not send faster; the node itself could take about 47 small transactions per second. No transaction was lost or rejected: when the node's waiting room (129 KB) is full, the submit command waits instead of failing. The 15-minute overload test below confirms it: submits waited up to 331 s and none was refused.</p>
   <figure>
     <figcaption class="t">Waiting time near the limit, testnet</figcaption>
     <figcaption class="s">Seconds from the planned send time to the block, against the readings per second the generator tried to send. Logarithmic scale. Solid: median. Dashed: p90.</figcaption>
     <div id="c-lat"></div>
     <div class="example"><b>Example</b>Transactions of 100 readings. At 200 readings per second a transaction typically waits 4.7 s, and 1 in 10 waits more than 10.8 s. At 400 per second the typical wait is 30 s and 1 in 10 waits more than 57 s. At 600 per second the typical wait is 103 s.</div>
   </figure>
-  <p>Below the limit a reading waits about 3 to 5 s (median). Above it the waiting time explodes: with 100-reading transactions the median is 4.7 s at 200 readings/s, 30 s at 400 and 103 s at 600. Even far below the limit some readings wait long, because blocks come at random moments: p90 is 17 s with single readings at 2 per second.</p>
+  <details class="tbl"><summary>Waiting time near the limit: the numbers</summary><p>Below the limit a reading waits about 3 to 5 s (median). Above it the waiting time explodes: with 100-reading transactions the median is 4.7 s at 200 readings/s, 30 s at 400 and 103 s at 600. Even far below the limit some readings wait long, because blocks come at random moments: p90 is 17 s with single readings at 2 per second.</p></details>
   <figure>
     <figcaption class="t">Best result with the two parameter sets</figcaption>
     <figcaption class="s">Readings per second stored, at 100 and 300 readings per transaction.</figcaption>
@@ -390,7 +405,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   </figure>
   <p>The mainnet-like chain, with 3 blocks per minute of 88 KB, stored about 120 readings/s, against 330 on the testnet. The calculation gives about 105, so the numbers fit. Each step saw only about 6 blocks, so single values are noisy.</p>
   <h3>Seen from many gateways, each with its own wallet</h3>
-  <p>The tests above send from one place, inside pool 1. A sensor system sends from many sites. To check that the limit does not depend on where the transactions come from, we started 6 (and later 12) gateway nodes on three VMs. Each node made its own key inside its container, and one transaction from the funded genesis key paid every gateway 100 ADA. Then all gateways signed their own transactions and submitted them at the same second through their own node. A transaction is timed from its planned send time to the block that holds it, as seen at the gateway's node. The chain was a fresh testnet with the load off. All gateways here dialled a pool directly (one hop); the next subsection puts them behind relays. Steps lasted 5 minutes, and 15 minutes for the overload test, because a 2-minute step sees only about 25 blocks and its result varies by about ±20%.</p>
+  <details class="tbl"><summary>How the gateway test was run</summary><p>A sensor system sends from many sites, so we checked that the limit does not depend on where the transactions come from. 6 (later 12) gateway nodes ran on three VMs. Each made its own key inside its container, and one transaction from the funded genesis key paid every gateway 100 ADA. Then all gateways signed their own transactions and submitted them at the same second through their own node; a transaction is timed from its planned send time to the block that holds it, as seen at the gateway's node. Fresh testnet, load off, every gateway one hop from a pool (relays follow below). Steps lasted 5 minutes, and 15 for the overload test, because a 2-minute step has only about 25 blocks and varies by about ±20%.</p></details>
   <figure>
     <figcaption class="t">Readings stored per second: six gateways against one place</figcaption>
     <figcaption class="s">100 readings per transaction. 5-minute steps. The dotted line is "everything offered is stored".</figcaption>
@@ -403,14 +418,14 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-gwlat"></div>
     <div class="example"><b>Example</b>At 200 readings per second a reading is typically stored after 7.3 s from six gateways and 7.7 s from one place, and 1 in 100 waits more than 32 s or 34 s. At 300 per second the typical wait grows to 18 s and 42 s.</div>
   </figure>
-  <p>The two curves are almost the same. Up to about 250 readings per second everything offered is stored, with a typical wait of 5 to 9 s. At 300 the waiting time jumps. A comfortable load is about 200 readings per second, where the typical wait is about 7 s and the slowest 1% wait about 32 s. The same holds for 12 gateways: at 400 offered they stored 290 per second.</p>
+  <p>The two curves are almost the same. Up to about 250 readings per second everything offered is stored, with a typical wait of 5 to 9 s; at 300 the wait jumps. A comfortable load is about 200 readings per second: typical wait about 7 s, slowest 1% about 32 s. With 12 gateways, 400 offered gave 290 stored per second.</p>
   <div class="card-table scroll"><table>
     <thead><tr><th>Overload test (15 minutes, 400 readings per second offered)</th><th class="n">Sent</th><th class="n">Stored per second, sustained</th><th class="n">Median wait</th></tr></thead>
     <tbody>
       <tr><td>6 gateways, 6 wallets (44 to 47 readings per second each)</td><td class="n">303</td><td class="n">291</td><td class="n">190 s</td></tr>
       <tr><td>one place</td><td class="n">276</td><td class="n">272 to 283</td><td class="n">204 s</td></tr>
     </tbody></table></div>
-  <p>Over 15 minutes the noise is gone: the chain stores about 280 readings per second with 100 readings per transaction, from one place or from six independent gateways, and the gateways get a fair share. The generators could not send the 400 offered: when the node's waiting room is full the submit command waits, so only 276 to 303 were sent.</p>
+  <p>Over 15 minutes the noise is gone: the chain stores about 280 readings per second with 100 readings per transaction, from one place or from six independent gateways, and the gateways get a fair share. The generators could not send the 400 offered, because submit waits when the waiting room is full: only 276 to 303 were sent.</p>
   <figure>
     <figcaption class="t">Readings stored per second for three batch sizes, six gateways</figcaption>
     <figcaption class="s">Readings per transaction: 10, 100 and 300. 5-minute steps. At 300 readings per transaction the point at 250 is the mean of five runs.</figcaption>
@@ -424,10 +439,10 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td class="n">100</td><td class="n">about 260 to 290</td><td class="n">≈ 280</td></tr>
       <tr><td class="n">300</td><td class="n">at least 337</td><td class="n">≈ 300</td></tr>
     </tbody></table></div>
-  <p>The batch size sets the capacity, as the calculation says. With 300 readings per transaction the measured values are above the calculated 300; five-minute windows vary by about ±13% with the number of blocks, so we only say "at least 337". Three repeats of the same 300-reading step stored 298, 258 and 283 readings per second at 300 offered, so one 5-minute value is good to about ±10%. No transaction was refused or lost, apart from one event described under "Trust".</p>
+  <details class="tbl"><summary>Batch size and noise</summary><p>The batch size sets the capacity, as calculated. With 300 readings per transaction the measured values are above the calculated 300; five-minute windows vary by about ±13% with the number of blocks, so we only say "at least 337". Three repeats of the same 300-reading step stored 298, 258 and 283 readings per second at 300 offered, so one 5-minute value is good to about ±10%. No transaction was refused or lost, apart from one event described under "Trust".</p></details>
 
   <h3>Gateways behind relays: does the number of hops matter?</h3>
-  <p>In the tests above every gateway dialled a pool directly, one hop away. A real site may sit behind one or more relays, so we repeated the test with 8 gateways, two each at 1, 2, 3 and 4 hops behind pool 1 (three relay nodes in a chain, gateways dialling the relay at their depth). All submitted at the same second, 100 readings per transaction, 5-minute steps. We then repeated it with 50 ms of added delay on every relay and gateway, and with 6 gateways all 4 hops deep.</p>
+  <p>To check relays, 8 gateways sat two each at 1, 2, 3 and 4 hops behind pool 1 (three relay nodes in a chain, each gateway dialling the relay at its depth). All submitted at the same second, 100 readings per transaction, 5-minute steps. We repeated it with 50 ms of added delay on every relay and gateway, and with 6 gateways all 4 hops deep.</p>
   <div class="card-table scroll"><table>
     <thead><tr><th>Typical wait (median, seconds)</th><th class="n">1 hop</th><th class="n">2 hops</th><th class="n">3 hops</th><th class="n">4 hops</th></tr></thead>
     <tbody>
@@ -438,10 +453,10 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>overloaded: 300 readings per second, no added delay</td><td class="n">11.5</td><td class="n">14.6</td><td class="n">25.5</td><td class="n">35.1</td></tr>
     </tbody></table></div>
   <div class="example"><b>Example</b>The chain is loaded with 250 readings per second and each link has 50 ms of delay. A gateway one hop from the pool sees its reading in a block after a typical 7.4 s. A gateway four hops away waits 11.5 s: about 1 s more per hop. Nothing is lost, and every gateway gets the same amount stored.</div>
-  <p>The capacity does not depend on the depth: up to 250 readings per second everything offered was stored at every depth, and 6 gateways all 4 hops deep stored 300 readings per second at 300 offered. No transaction was lost or refused. What the depth changes is the waiting time: about 1 s per hop with 50 ms of delay, and under overload the far gateways wait much longer, because their transactions reach the pool later and queue behind those of the near gateways (35 s at 4 hops against 11.5 s at 1 hop). The relays here are on the same Mac, so this shows the effect of extra hops, not of real long links.</p>
+  <p>The capacity does not depend on the depth: up to 250 readings per second everything offered was stored at every depth, and 6 gateways all 4 hops deep stored 300 readings per second at 300 offered. No transaction was lost or refused. The depth changes the waiting time: about 1 s per hop with 50 ms of delay, and under overload the far gateways wait much longer, because their transactions reach the pool later and queue behind those of the near gateways (35 s at 4 hops against 11.5 s at 1 hop). The relays share one Mac, so this shows the effect of extra hops, not of real long links.</p>
 
   <h3>What a reading costs on mainnet (calculation, not a measurement)</h3>
-  <p>A transaction fee on Cardano mainnet is about 44 lovelace per byte plus 155,381 lovelace (1 ADA is 1,000,000 lovelace). These are the current mainnet parameters, checked on 2 November against the public Koios API (44 and 155,381 lovelace; largest transaction 16,384 bytes; block body 90,112 bytes). Script costs and the price of ADA are not included. Our private testnet charges about 1 lovelace per byte, so the cost there is negligible.</p>
+  <p>A transaction fee on Cardano mainnet is 44 lovelace per byte plus 155,381 lovelace (1 ADA is 1,000,000 lovelace), checked on 2 November against the public Koios API (largest transaction 16,384 bytes; block body 90,112 bytes). Script costs and the price of ADA are not included. Our private testnet charges about 1 lovelace per byte.</p>
   <div class="card-table scroll"><table>
     <thead><tr><th class="n">Readings per transaction</th><th class="n">Size</th><th class="n">Fee per transaction</th><th class="n">Fee per reading</th><th class="n">Per day at 100 readings per second</th></tr></thead>
     <tbody>
@@ -460,8 +475,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How long does a join take on a link with real-world speed, delay and loss?</dd>
     <dt>Why</dt><dd>Sensor sites will not sit in a data center. Plain delay (sections 1 to 3) leaves out the bandwidth.</dd>
-    <dt>Method</dt><dd>Five profiles with download and upload caps, one-way delay and loss added to the joiner. The data transferred is about 0.5 GB (cap times time). Each profile ran one or two joins.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>Five profiles with download and upload caps, one-way delay and loss added to the joiner. The data transferred is about 0.5 GB (cap times time). Each profile ran one or two joins.</p></details>
   <div class="card-table scroll"><table>
     <thead><tr><th>Profile</th><th class="n">Down / up (Mbit/s)</th><th class="n">Delay (ms)</th><th class="n">Loss</th><th class="n">Hop 1 join (s)</th><th class="n">Hop 2 join (s)</th><th class="n">Block arrival hop 1 (ms)</th></tr></thead>
     <tbody>
@@ -486,10 +502,11 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How long until a stored reading can no longer be undone? What happens when a node or a pool is cut off, and does the chain heal?</dd>
     <dt>Why</dt><dd>A system that stores evidence needs to know when a record is final, and how it behaves when an organisation's pool loses its connection.</dd>
-    <dt>Method</dt><dd>5-second testnet with the load running. Finality: 12 small transactions, each timed until the chain tip is 60 blocks deeper (60 is the security parameter k). Catch-up: a node is cut off (all packets it sends dropped), reconnected, and timed until it is within 20 seconds of the chain clock. Failures: pools stopped or cut off by stopping their network router, then switched back on. We time how long until the three pools show the same tip.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>5-second testnet with the load running. Finality: 12 small transactions, each timed until the chain tip is 60 blocks deeper (60 is the security parameter k). Catch-up: a node is cut off (all packets it sends dropped), reconnected, and timed until it is within 20 seconds of the chain clock. Failures: pools stopped or cut off by stopping their network router, then switched back on. We time how long until the three pools show the same tip.</p></details>
   <h3>Finality</h3>
-  <p>A transaction is in a block after about 6 s (6.1 s on average). It is final, 60 blocks deep, after about 310 s, a little over 5 minutes (295 to 332 s over 12 transactions). The 60 blocks need about 305 s after the transaction is in a block, at about 12 blocks per minute.</p>
+  <p>A transaction is in a block after about 6 s (6.1 s on average). It is final, 60 blocks deep, after about 310 s, a little over 5 minutes (295 to 332 s over 12 transactions): the 60 blocks need about 305 s at about 12 blocks per minute.</p>
   <div class="example"><b>Example</b>A sensor reading is submitted at 12:00:00. It is in a block at about 12:00:06 and anyone can read it. From 12:05:10 on, it can no longer be undone by a fork.</div>
   <h3>Catch-up after an outage</h3>
   <div class="card-table scroll"><table>
@@ -499,7 +516,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>5 minutes</td><td class="n">10 to 143 s</td><td class="n">3.4 to 5.1 MB</td><td>13, 27, 136 and 143 s; later 27, 140, 18 and 10 s</td></tr>
       <tr><td>15 minutes</td><td class="n">71 to 87 s</td><td class="n">11 to 13 MB</td><td>one run each at hop 1 and hop 2</td></tr>
     </tbody></table></div>
-  <p>The catch-up time does not grow with the outage. The data does, at about 0.9 MB per minute of outage, and downloading it takes under a second. The time is a pause of the node before it reconnects. In a later check (hop 1, almost empty blocks) we counted the bytes the node received every half second after the link came back: during the whole 10 to 29 s wait nothing arrived, then it was up to date within the same second. So the wait is an idle pause, not a slow download. Six further runs took 29, 27, 140, 29, 18 and 10 s; the 140 s case appeared once and was not traced. What ends the pause (probably the node's own retry delay) was not confirmed in the logs.</p>
+  <p>The catch-up time does not grow with the outage; the data does, at about 0.9 MB per minute of outage, and it downloads in under a second. The time is an idle pause before the node reconnects: counting the bytes received every half second after the link came back (hop 1, almost empty blocks), nothing arrived during the whole 10 to 29 s wait, then the node was up to date within the same second. Six further runs took 29, 27, 140, 29, 18 and 10 s; the 140 s case was not traced. What ends the pause (probably the node's own retry delay) was not confirmed in the logs.</p>
   <div class="example"><b>Example</b>A gateway loses its link for 5 minutes. When the link is back it needs between 10 s and 2.5 minutes to be up to date again, and it downloads about 4 MB.</div>
   <h3>Pools stopped or cut off</h3>
   <div class="card-table scroll"><table>
@@ -512,7 +529,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>cut off for 6 min</td><td class="n">29 blocks apart</td><td class="n">43 s</td></tr>
       <tr><td>cut off for 15 min</td><td class="n">44 blocks apart</td><td class="n"><b>did not heal</b></td></tr>
     </tbody></table></div>
-  <p>With one pool of three stopped the chain keeps going, and with two stopped it still runs at a third of the speed, as expected from the stake. A cut-off pool keeps forging its own short fork. When it comes back it drops its fork and follows the main chain, as long as its fork has fewer than 60 blocks (the security limit k). After 15 minutes the cut-off pool had made about 60 blocks of its own, so it could not go back. The real limit lies between 6 and 15 minutes; we did not test in between. The repair took 29 s: wipe the isolated pool's database and restart it, and it syncs from the others.</p>
+  <p>With one pool of three stopped the chain keeps going, and with two stopped it still runs at a third of the speed, as the stake predicts. A cut-off pool keeps forging its own short fork and drops it when it comes back, as long as the fork has fewer than 60 blocks (the security limit k). After 15 minutes it had made about 60 blocks of its own and could not go back. The real limit lies between 6 and 15 minutes (untested). The repair took 29 s: wipe the isolated pool's database and restart it, and it syncs from the others.</p>
   <div class="example"><b>Example</b>An organisation's pool loses its connection for 3 minutes. The other two pools continue, and 66 s after the link is back the pool agrees with them again. After a loss of 15 minutes its operator must wipe the pool's database and resync, which takes under a minute.</div>
   <span class="trust warn">▲ Rough · single runs; the block rates during the tests are noisy, and the boundary between 6 and 15 minutes is untested</span>
   <div class="takeaway">The chain survives the loss of one pool, and even two, and heals within about two minutes after a short cut. A pool that stays isolated for about 15 minutes needs a manual resync.</div>
@@ -522,8 +539,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How much data does a node move in normal operation? What does it cost a pool when many nodes connect to it? What happens when a node's clock is wrong?</dd>
     <dt>Why</dt><dd>A site on a mobile data plan needs the daily volume. A pool that serves many gateways needs to cope. Sensor sites often have clocks that drift.</dd>
-    <dt>Method</dt><dd>Traffic: the byte counters of each node's network card over 10 minutes, with the load off (empty blocks) and on (full blocks). Many nodes: 1, 4, 8 and 12 nodes dial pool 1 directly, 5 minutes each. Clock: one node gets its clock set wrong by 1 to 10 s, joins, and is watched for 2 minutes.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>Traffic: the byte counters of each node's network card over 10 minutes, with the load off (empty blocks) and on (full blocks). Many nodes: 1, 4, 8 and 12 nodes dial pool 1 directly, 5 minutes each. Clock: one node gets its clock set wrong by 1 to 10 s, joins, and is watched for 2 minutes.</p></details>
   <h3>Traffic</h3>
   <div class="card-table scroll"><table>
     <thead><tr><th>Load</th><th>Node</th><th class="n">Received per hour</th><th class="n">Sent per hour</th><th class="n">Received per day</th></tr></thead>
@@ -550,7 +568,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-skew"></div>
     <div class="example"><b>Example</b>A sensor site's clock is 5 seconds behind. Its node connects but is dropped 8 to 11 times in 2 minutes, because new blocks look to be from the future, and it is up to date about 68% of the time. If the clock is 5 seconds ahead there is no problem at all.</div>
   </figure>
-  <p>A node accepts a block only if its time is no more than 2 s in the future of the node's clock. A clock that is ahead causes no problem: in all three runs it behaved like a correct clock. A clock behind by 2 s or more makes the node drop the connection again and again, 6 to 13 times in the 2 minutes. It reconnects and catches up, so it is up to date for part of the time: in the median of three runs 86% at 2 s behind, 95% at 3 s, 68% at 5 s and 50% at 10 s. The runs differ a lot (at 10 s behind between 41% and 100%), so only the direction is firm: the further behind, the worse. The first sync took about 29 s in almost every run. The first attempt at this test did not restore the clock between the offsets, so its errors added up; we saw that in the node's own logs and repeated it twice with a proper restore. The logged header ages now match the offsets (worst case 2.5, 5.5 and 10.0 s). One run (2 s behind, third repetition) was interrupted by a 15-minute sleep of the Mac, and its first sync time is missing.</p>
+  <details class="tbl"><summary>The clock test: details</summary><p>A node accepts a block only if its time is no more than 2 s in the future of the node's clock. A clock that is ahead causes no problem (in all three runs it behaved like a correct clock). A clock behind by 2 s or more makes the node drop the connection 6 to 13 times in the 2 minutes; it reconnects and catches up, so it is up to date for part of the time: median of three runs 86% at 2 s behind, 95% at 3 s, 68% at 5 s and 50% at 10 s. The runs differ a lot (41% to 100% at 10 s behind), so only the direction is firm: the further behind, the worse. The first sync took about 29 s. The first attempt did not restore the clock between the offsets, so its errors added up (seen in the node's logs); we repeated it twice with a proper restore, and the logged header ages now match the offsets (worst case 2.5, 5.5 and 10.0 s). One run (2 s behind, third repetition) overlapped a 15-minute sleep of the Mac and lacks its first sync time.</p></details>
   <span class="trust warn">▲ Rough · the traffic and many-nodes numbers are solid; the clock results come from three runs per offset and vary between runs</span>
   <div class="takeaway">A pool serves a dozen nodes without trouble. A sensor node with a clock that runs behind by more than 2 seconds is unreliable, so every site needs working time synchronisation.</div>
 </section>
@@ -559,8 +577,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>How much CPU, memory and disk do the machines that host the nodes use, and did they limit our results?</dd>
     <dt>Why</dt><dd>This is the point of the four-VM case: what a site needs to host a node, and whether the VMs on one Mac distorted the measurements.</dd>
-    <dt>Method</dt><dd>A sampler read the CPU use and memory of the <code>cardano-node</code> processes and the free memory of every VM once a minute during four runs (growth, the large-chain matrix, the fork test and the outsider test). CPU is in percent of one core, so 100% is one core and a VM with 2 CPUs can show up to 200%. We also looked at the Mac a few times with its own tools.</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>A sampler read the CPU use and memory of the <code>cardano-node</code> processes and the free memory of every VM once a minute during four runs (growth, the large-chain matrix, the fork test and the outsider test). CPU is in percent of one core, so 100% is one core and a VM with 2 CPUs can show up to 200%. We also looked at the Mac a few times with its own tools.</p></details>
   <div class="card-table scroll"><table>
     <thead><tr><th>Machine</th><th>Runs on it</th><th class="n">CPU mean</th><th class="n">CPU peak</th><th class="n">Node memory</th><th class="n">Free memory (lowest)</th></tr></thead>
     <tbody>
@@ -569,8 +588,10 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>seedvm with 1 to 12 nodes on pool 1</td><td>pool 1 (fan-out test)</td><td class="n">3.3 to 3.6%</td><td class="n">not sampled</td><td class="n">not sampled</td><td class="n">not sampled</td></tr>
     </tbody></table></div>
   <p>In steady state a node is light: a pool node uses about 145 MB and a few percent of one core, and a following node about 200 MB. The one heavy moment is the sync of a new node. The joining node used up to 1.3 cores of its 2 for the seconds or minutes it needed, which is the only place where a VM came close to its limit. That fits the copy speed that levelled off near 20 MB/s in section 1, but we did not test whether the CPU is what limits it.</p>
+  <details class="fold"><summary>Disk, and how the Mac itself coped</summary>
   <p>Disk: seedvm used 27 of its 96 GB after about 12,000 blocks. A joining node's database was about 1.2 GB at 10,700 blocks, twice the 625 MB it received, because it also builds its own ledger state. At full load the chain grows about 1 GB per day.</p>
   <p>The Mac: in the spot checks the VMware processes held 0.15 to 1.4 GB of memory each (1.4 GB for the pool VM). About 47% of the Mac's memory was free, swap use was 157 MB of 1 GB, there was no thermal or performance warning, and the load average was about 1. We did not record the Mac's CPU during the runs, so how much the VMs competed for it is known only from one case: a fibre join took 97 s instead of 47 s while other work ran on the Mac.</p>
+  </details>
   <div class="example"><b>Example</b>A small gateway VM with 2 CPUs and 2 GB can host a node. It uses about 200 MB of memory and a few percent of a core, and up to 1.3 cores for the minute it needs to join.</div>
   <span class="trust warn">▲ Rough · VM-level samples once a minute in four runs; the Mac's own CPU was not recorded during the runs</span>
   <div class="takeaway">Hosting a node is cheap. A 2 GB VM with 2 CPUs is enough, and the CPU only matters during a join. The pools never came near the limits of their VM.</div>
@@ -581,8 +602,9 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <dl class="qa">
     <dt>Question</dt><dd>If a node from a different Cardano network connects to one of our pools, who refuses it, how fast, and does the real chain notice?</dd>
     <dt>Why</dt><dd>A sensor system needs to know whether a foreign or hostile node can disturb it. Two things can differ between networks: the genesis (the start of the chain) and the magic number.</dd>
-    <dt>Method</dt><dd>On a spare VM a rogue node with its own genesis, its own pool and its own keys forged its own chain and dialled pool 1 for 10 minutes. We measured 5 minutes before, 10 minutes with the rogue and 5 minutes after. Two cases were run: the same magic (42), and a different magic (43).</dd>
+    
   </dl>
+  <details class="method"><summary>How it was measured</summary><p>On a spare VM a rogue node with its own genesis, its own pool and its own keys forged its own chain and dialled pool 1 for 10 minutes. We measured 5 minutes before, 10 minutes with the rogue and 5 minutes after. Two cases were run: the same magic (42), and a different magic (43).</p></details>
   <div class="card-table scroll"><table>
     <thead><tr><th>Genesis</th><th>Magic</th><th>Handshake</th><th>Who rejects, and when</th><th>Reconnect</th><th>Effect on the real chain</th></tr></thead>
     <tbody>
@@ -597,7 +619,15 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
 </section>
 <section id="trust">
   <h2>How far to trust the numbers</h2>
-  <p>Several problems appeared during the night. All were found and either fixed or marked.</p>
+  <p>Several problems appeared during the measurements. All were found and either fixed or marked. Those that touch numbers you may quote:</p>
+  <div class="glossary">
+    <div><b>Mainnet-like fork test, 2000 ms.</b> Pool 1 was cut off, so the row is invalid and marked "do not use".</div>
+    <div><b>Propagation windows.</b> For part of the large-chain matrix the window used the VM clock instead of the Mac clock. Fixed; the data was re-analysed from the saved logs.</div>
+    <div><b>51 lost transactions.</b> In one 5-minute gateway step five gateways each had 10 or 11 transactions refused for 60 seconds in a row and gave up, all at the same moment, about 3 minutes into the step. The step was repeated four times, and on 2 November in three more full runs (nine more steps, refusal messages now kept): nothing was lost or refused. The cause is unknown.</div>
+    <div><b>Failure tests.</b> The block rate "before" each test ranged from 5 to 20 blocks per minute and is not reliable; this page quotes only heal times and rates during the outage.</div>
+  </div>
+  <p>Limits that apply to everything: all machines are VMs on one Mac, so CPU and disk are shared. Delay and loss are emulated on the sender side only. The chain is small and the pools are few. The "synced" test (newest block less than 20 s old) adds noise of up to 20 s when blocks come every 20 s, so the mainnet-like join times are only a baseline.</p>
+  <details class="fold"><summary>All incidents of the measurement days (table)</summary>
   <div class="card-table scroll"><table>
     <thead><tr><th>What happened</th><th>Effect</th><th>Action</th></tr></thead>
     <tbody>
@@ -610,33 +640,31 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>In one 5-minute step (6 gateways, 300 readings per transaction, 250 readings per second) five gateways each had 10 or 11 transactions refused for 60 seconds in a row and gave up.</td><td>51 transactions were never accepted by their node. All five stopped at the same moment, about 3 minutes into the step. The sixth gateway and all other steps were fine.</td><td>The step was repeated four times and nothing was lost; on 2 November it was repeated in three more full runs (nine more steps, refusal messages now kept) and again nothing was lost or refused. We did not save the refusal messages the first time, so the cause is unknown.</td></tr>
       <tr><td>One fibre hop-2 join took 97 s instead of 47 s.</td><td>Other work (a test on a spare VM) used the same Mac.</td><td>The clean repetition is reported. Do not run other work during a measurement.</td></tr>
     </tbody></table></div>
-  <p>Limits that apply to everything: all machines are VMs on one Mac, so CPU and disk are shared. Delay and loss are emulated on the sender side only. The chain is small and the pools are few. The "synced" test (newest block less than 20 s old) adds noise of up to 20 s when blocks come every 20 s, so the mainnet-like join times are only a baseline.</p>
+  </details>
 </section>
 <section id="hyp">
   <h2>What we think but did not prove</h2>
   <p>The numbers are measured. These explanations of them are not.</p>
   <div class="glossary">
-    <div><b>Why a full block costs 3 times the delay.</b> A 60 KB block needs several TCP round trips (slow start). It fits the data (nearly empty blocks cost about 1 times the delay, full blocks about 3 times), but we never captured the packets to count the round trips.</div>
-    <div><b>Why block arrival depends on block size, not on block rhythm.</b> The mainnet-like chain, with nearly empty blocks, behaved like the testnet with empty blocks. Block size was never changed alone.</div>
+    <div><b>Why a full block costs 3 times the delay.</b> Probably several TCP round trips for a 60 KB block. It fits the data (nearly empty blocks about 1 times the delay, full blocks about 3 times), but we never captured the packets.</div>
+    <div><b>Why block arrival depends on block size, not rhythm.</b> The mainnet-like chain, with nearly empty blocks, behaved like the testnet with empty blocks. Block size was never changed alone.</div>
     <div><b>Why joins stop speeding up near 20 MB/s.</b> The joining node used up to 1.3 of its 2 cores, so the CPU is the likely limit. Not tested.</div>
-    <div><b>Why hop 2 did not finish with 100 ms and 1% loss.</b> We expect TCP to slow down on a lossy link that carries bulk data. Not tested apart.</div>
-    <div><b>Why catch-up after an outage varies from 10 s to 143 s.</b> Checked: the node receives nothing during the wait, so it is an idle pause, not a slow download. What ends the pause (we think the node's own retry delay) is not confirmed in the logs.</div>
-    <div><b>Why a full waiting room does not lose transactions.</b> Checked in the data: in the 15-minute overload test the submit command waited up to 331 s and nothing was refused. It waits for room; it does not refuse.</div>
+    <div><b>Why hop 2 did not finish at 100 ms and 1% loss.</b> We expect TCP to slow down on a lossy, delayed link that carries bulk data. Not tested apart.</div>
+    <div><b>Why catch-up after an outage varies from 10 s to 143 s.</b> Checked: nothing is received during the wait, so it is an idle pause. What ends it (we think the node's retry delay) is not confirmed.</div>
     <div><b>Why three nodes joining together were 2.6 and 3.3 times slower in two checkpoints.</b> Unknown.</div>
-    <div><b>What refused the transactions of five gateways at once.</b> One 5-minute step lost 51 transactions; seven repeats (four, then three runs of three steps with the messages kept) lost none. The cause stays unknown.</div>
+    <div><b>What refused the transactions of five gateways at once.</b> Unknown (see Trust).</div>
     <div><b>Where healing stops.</b> A cut of 6 minutes heals and one of 15 minutes does not. The limit in between, expected near 60 blocks of the isolated pool's own fork, was not tested.</div>
   </div>
 </section>
 
 <section id="next">
   <h2>What is still open</h2>
-  <p>Ideas for the next round, in order of value for CyberTel:</p>
   <div class="glossary">
-    <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
-    <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
-    <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
-    <div><b>Real separate networks</b> Every result here comes from VMs on one Mac. The same tests with machines in different places would show how much of the delay, loss and CPU sharing was an artefact. A packet capture of one block transfer would also confirm the round-trip explanation of section 2.</div>
-    <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
+    <div><b>A new block producer.</b> Register a fourth pool on the running chain, give it stake, and measure the time to its first block and the effect on forks. It takes about two epochs (100 minutes).</div>
+    <div><b>A producer at the far end of a relay chain.</b> The realistic setup; the per-hop rule of section 3 should apply to its blocks.</div>
+    <div><b>Smart-contract cost.</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. Needs a validator tool installed.</div>
+    <div><b>Real separate networks.</b> Every result here comes from VMs on one Mac. Machines in different places would show how much of the delay, loss and CPU sharing was an artefact. A packet capture of one block transfer would also confirm the round-trip explanation of section 2.</div>
+    <div><b>Failures in between.</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times.</div>
   </div>
   <footer>
     <p>Scripts and the summary files of every run are in the repository <code>vaizan4ikys/cardano-seed-testnet</code>, under <code>experiments/measure</code>, <code>experiments/saturation</code> and <code>experiments/outsider</code>; this report is <code>docs/measurement-report.html</code>. The raw node logs of the runs are not published.</p>
