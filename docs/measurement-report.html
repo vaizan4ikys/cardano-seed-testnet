@@ -98,7 +98,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
 
 <div class="wrap">
 <header class="top">
-  <div class="eyebrow">CyberTel · sensor data on a blockchain · 29 October to 1 November 2026</div>
+  <div class="eyebrow">CyberTel · sensor data on a blockchain · 29 October to 2 November 2026</div>
   <h1>Cardano Testnet Measurements</h1>
   <p class="lede">A private Cardano network with three block-producing pools runs inside the SEED emulator. Four virtual machines on one Mac stood in for a small distributed system. We measured how fast new nodes join, how fast blocks and transactions travel, how much sensor data the chain can carry, and what a foreign network does to it. This page says why each measurement was taken and what the numbers mean.</p>
   <ul class="facts">
@@ -197,7 +197,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>3 · Many hops</td><td>testnet; propagation at 90 to 100 MB, joins at 627 MB</td><td>on; joins: off</td><td>propagation 1 run; joins 3 runs</td></tr>
       <tr><td>4 · Transactions</td><td>testnet and mainnet-like</td><td>mixed</td><td>6 to 10 per cell</td></tr>
       <tr><td>5 · Forks</td><td>testnet (20 min) and mainnet-like (30 min)</td><td>on</td><td>1 run per delay</td></tr>
-      <tr><td>6 · Capacity</td><td>testnet at 353 MB; mainnet-like small; gateways: fresh testnet</td><td>off</td><td>2-minute steps; gateways: 5- and 15-minute steps</td></tr>
+      <tr><td>6 · Capacity</td><td>testnet at 353 MB; mainnet-like small; gateways: fresh testnet</td><td>off</td><td>2-minute steps; gateways: 5- and 15-minute steps, 3 repeats of one step; behind relays: 3 runs, 1 per setting</td></tr>
       <tr><td>7 · Real links</td><td>testnet, about 10,700 blocks</td><td>off</td><td>1 to 2 joins per profile</td></tr>
       <tr><td>8 · Finality, outages, failures</td><td>testnet</td><td>on</td><td>12 transactions; 1 to 5 outages per setting; 1 failure run</td></tr>
       <tr><td>9 · Traffic, many nodes, clocks</td><td>testnet</td><td>traffic: off and on; others: on, off</td><td>1 window; 1 run; 3 runs per offset</td></tr>
@@ -373,7 +373,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div id="c-sat"></div>
     <div class="example"><b>Example</b>Each transaction carries 100 readings. The generator offers 200 readings per second (2 transactions per second) and the chain stores 197 per second, almost all of it. The generator offers 290 per second: the chain stores 274 and the rest waits in the queue.</div>
   </figure>
-  <p>The limit is about 300 readings/s, which fits the calculation: five 300-reading transactions per block, about twelve blocks per minute, 307 readings/s. Batches of 1 and 10 readings reached only 20 and 148 readings/s because the test program (one <code>cardano-cli</code> process per transaction) could not send faster. The node itself could have taken about 47 small transactions per second. No transaction was lost and none was rejected. When the node's waiting room is full (129 KB), the submit command waits instead of failing. This is inferred from the results and not tested separately.</p>
+  <p>The limit is about 300 readings/s, which fits the calculation: five 300-reading transactions per block, about twelve blocks per minute, 307 readings/s. Batches of 1 and 10 readings reached only 20 and 148 readings/s because the test program (one <code>cardano-cli</code> process per transaction) could not send faster. The node itself could have taken about 47 small transactions per second. No transaction was lost and none was rejected. When the node's waiting room is full (129 KB), the submit command waits instead of failing. The 15-minute overload test below confirms it: submits waited up to 331 s and none was refused.</p>
   <figure>
     <figcaption class="t">Waiting time near the limit, testnet</figcaption>
     <figcaption class="s">Seconds from the planned send time to the block, against the readings per second the generator tried to send. Logarithmic scale. Solid: median. Dashed: p90.</figcaption>
@@ -424,7 +424,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td class="n">100</td><td class="n">about 260 to 290</td><td class="n">≈ 280</td></tr>
       <tr><td class="n">300</td><td class="n">at least 337</td><td class="n">≈ 300</td></tr>
     </tbody></table></div>
-  <p>The batch size sets the capacity, as the calculation says. With 300 readings per transaction the measured values are above the calculated 300; five-minute windows vary by about ±13% with the number of blocks, so we only say "at least 337". No transaction was refused or lost, apart from one event described under "Trust".</p>
+  <p>The batch size sets the capacity, as the calculation says. With 300 readings per transaction the measured values are above the calculated 300; five-minute windows vary by about ±13% with the number of blocks, so we only say "at least 337". Three repeats of the same 300-reading step stored 298, 258 and 283 readings per second at 300 offered, so one 5-minute value is good to about ±10%. No transaction was refused or lost, apart from one event described under "Trust".</p>
 
   <h3>Gateways behind relays: does the number of hops matter?</h3>
   <p>In the tests above every gateway dialled a pool directly, one hop away. A real site may sit behind one or more relays, so we repeated the test with 8 gateways, two each at 1, 2, 3 and 4 hops behind pool 1 (three relay nodes in a chain, gateways dialling the relay at their depth). All submitted at the same second, 100 readings per transaction, 5-minute steps. We then repeated it with 50 ms of added delay on every relay and gateway, and with 6 gateways all 4 hops deep.</p>
@@ -495,12 +495,12 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <div class="card-table scroll"><table>
     <thead><tr><th>Node cut off for</th><th class="n">Catch-up time</th><th class="n">Data downloaded</th><th>Runs</th></tr></thead>
     <tbody>
-      <tr><td>1 minute</td><td class="n">27 to 33 s</td><td class="n">about 1 MB</td><td>5 repeats, plus one first pass of 4.4 s</td></tr>
-      <tr><td>5 minutes</td><td class="n">13 to 143 s</td><td class="n">3.4 to 5.1 MB</td><td>13, 27, 136 and 143 s</td></tr>
+      <tr><td>1 minute</td><td class="n">27 to 33 s</td><td class="n">about 1 MB</td><td>5 repeats, plus one first pass of 4.4 s; later 29 s and 29 s</td></tr>
+      <tr><td>5 minutes</td><td class="n">10 to 143 s</td><td class="n">3.4 to 5.1 MB</td><td>13, 27, 136 and 143 s; later 27, 140, 18 and 10 s</td></tr>
       <tr><td>15 minutes</td><td class="n">71 to 87 s</td><td class="n">11 to 13 MB</td><td>one run each at hop 1 and hop 2</td></tr>
     </tbody></table></div>
   <p>The catch-up time does not grow with the outage. The data does, at about 0.9 MB per minute of outage, and downloading it takes under a second. The time is a pause of the node before it reconnects. In a later check (hop 1, almost empty blocks) we counted the bytes the node received every half second after the link came back: during the whole 10 to 29 s wait nothing arrived, then it was up to date within the same second. So the wait is an idle pause, not a slow download. Six further runs took 29, 27, 140, 29, 18 and 10 s; the 140 s case appeared once and was not traced. What ends the pause (probably the node's own retry delay) was not confirmed in the logs.</p>
-  <div class="example"><b>Example</b>A gateway loses its link for 5 minutes. When the link is back it needs between 13 s and 2.5 minutes to be up to date again, and it downloads about 4 MB.</div>
+  <div class="example"><b>Example</b>A gateway loses its link for 5 minutes. When the link is back it needs between 10 s and 2.5 minutes to be up to date again, and it downloads about 4 MB.</div>
   <h3>Pools stopped or cut off</h3>
   <div class="card-table scroll"><table>
     <thead><tr><th>Test (pool 3 unless noted)</th><th class="n">Chain during the test</th><th class="n">Pools agree again after</th></tr></thead>
@@ -635,6 +635,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
     <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
     <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
+    <div><b>Real separate networks</b> Every result here comes from VMs on one Mac. The same tests with machines in different places would show how much of the delay, loss and CPU sharing was an artefact. A packet capture of one block transfer would also confirm the round-trip explanation of section 2.</div>
     <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
   </div>
   <footer>
