@@ -120,7 +120,8 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <div class="card-table scroll"><table>
     <thead><tr><th>Question</th><th>Answer</th><th class="n">Section</th></tr></thead>
     <tbody>
-      <tr><td>How much sensor data can one chain take?</td><td>About 300 readings per second on the testnet with 5-second blocks (batches of 100 to 300 readings per transaction), and about 100 to 120 with 20-second blocks. Waiting time jumps from seconds to minutes at the limit.</td><td class="n">6</td></tr>
+      <tr><td>How much sensor data can one chain take?</td><td>About 280 readings per second on the testnet with 5-second blocks with 100 readings per transaction, the same from one place and from 6 or 12 independent gateways. With 10 per transaction only about 180, with 300 at least 337. With 20-second blocks about 100 to 120. The waiting time jumps from seconds to minutes at the limit.</td><td class="n">6</td></tr>
+      <tr><td>What does a reading cost on mainnet?</td><td>From the fee formula (a calculation): about 0.0035 ADA per reading with 100 readings per transaction, 0.0024 with 300, 0.168 with one. At 100 readings per second that is about 30,000 ADA per day, so storing only a hash of each batch is far cheaper.</td><td class="n">6</td></tr>
       <tr><td>How long until a reading is stored?</td><td>In a block after about 6 s (5-second blocks) or about 13 s (20-second blocks); the network's share is under 1 s. It cannot be undone after about 5 minutes (60 blocks) on the testnet.</td><td class="n">4, 8</td></tr>
       <tr><td>How far apart can the pools be?</td><td>With 5-second blocks up to about 100 ms; at 300 ms, 22% of the blocks are lost to forks. With 20-second blocks, 500 ms is fine (6% lost).</td><td class="n">5</td></tr>
       <tr><td>What does a slow link cost a site?</td><td>A block arrives after 3.2 times the link delay, plus 7.1 times the delay for every relay in between. Joining (0.6 GB) takes about 28 s on a good link, 3 minutes on 4G and 13 minutes on rural DSL.</td><td class="n">1, 2, 3, 7</td></tr>
@@ -195,7 +196,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>3 · Many hops</td><td>testnet; propagation at 90 to 100 MB, joins at 627 MB</td><td>on; joins: off</td><td>propagation 1 run; joins 3 runs</td></tr>
       <tr><td>4 · Transactions</td><td>testnet and mainnet-like</td><td>mixed</td><td>6 to 10 per cell</td></tr>
       <tr><td>5 · Forks</td><td>testnet (20 min) and mainnet-like (30 min)</td><td>on</td><td>1 run per delay</td></tr>
-      <tr><td>6 · Capacity</td><td>testnet at 353 MB; mainnet-like small</td><td>off</td><td>2-minute steps</td></tr>
+      <tr><td>6 · Capacity</td><td>testnet at 353 MB; mainnet-like small; gateways: fresh testnet</td><td>off</td><td>2-minute steps; gateways: 5- and 15-minute steps</td></tr>
       <tr><td>7 · Real links</td><td>testnet, about 10,700 blocks</td><td>off</td><td>1 to 2 joins per profile</td></tr>
       <tr><td>8 · Finality, outages, failures</td><td>testnet</td><td>on</td><td>12 transactions; 1 to 5 outages per setting; 1 failure run</td></tr>
       <tr><td>9 · Traffic, many nodes, clocks</td><td>testnet</td><td>traffic: off and on; others: on, off</td><td>1 window; 1 run; 3 runs per offset</td></tr>
@@ -211,6 +212,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>Transaction</b> One message sent to the chain. It has a fixed part of about 245 bytes and can carry many readings.</div>
     <div><b>Mempool</b> The waiting room of a node. A transaction sits there until a pool puts it into a block.</div>
     <div><b>Hop</b> Hop 1 is a node that connects directly to a pool. Hop 2 connects through a hop-1 node.</div>
+    <div><b>Gateway</b> A site's node together with its own wallet. It builds, signs and submits the transactions of its sensors.</div>
     <div><b>Join</b> A new node with an empty database downloads the whole chain until it is up to date.</div>
     <div><b>Fork, orphan</b> Two pools make a block at almost the same time. One block loses and is dropped: an orphan.</div>
     <div><b>Median, p90, p95</b> The typical value; and the value that 10% (or 5%) of cases exceed.</div>
@@ -386,7 +388,56 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div class="example"><b>Example</b>Transactions of 100 readings. The testnet stores about 274 readings per second, the mainnet-like chain about 117 (calculated: 100). So 1,000 sensors that send one reading every 10 seconds (100 per second) fit on either chain, but 1,000 sensors that send one reading every 5 seconds (200 per second) fit only on the testnet.</div>
   </figure>
   <p>The mainnet-like chain, with 3 blocks per minute of 88 KB, stored about 120 readings/s, against 330 on the testnet. The calculation gives about 105, so the numbers fit. Each step saw only about 6 blocks, so single values are noisy.</p>
-  <span class="trust warn">▲ Rough · the limit and the shape are clear; single steps are off by about 10%</span>
+  <h3>Seen from many gateways, each with its own wallet</h3>
+  <p>The tests above send from one place, inside pool 1. A sensor system sends from many sites. To check that the limit does not depend on where the transactions come from, we started 6 (and later 12) gateway nodes on three VMs. Each node made its own key inside its container, and one transaction from the funded genesis key paid every gateway 100 ADA. Then all gateways signed their own transactions and submitted them at the same second through their own node. A transaction is timed from its planned send time to the block that holds it, as seen at the gateway's node. The chain was a fresh testnet with the load off. Steps lasted 5 minutes, and 15 minutes for the overload test, because a 2-minute step sees only about 25 blocks and its result varies by about ±20%.</p>
+  <figure>
+    <figcaption class="t">Readings stored per second: six gateways against one place</figcaption>
+    <figcaption class="s">100 readings per transaction. 5-minute steps. The dotted line is "everything offered is stored".</figcaption>
+    <div id="c-gwcurve"></div>
+    <div class="example"><b>Example</b>The generators try to send 200 readings per second. Six gateways with their own wallets get 194 per second stored, one place gets 193. At 250 per second the results are 249 and 242.</div>
+  </figure>
+  <figure>
+    <figcaption class="t">Waiting time against the load: six gateways against one place</figcaption>
+    <figcaption class="s">Seconds from the planned send time to the block. Logarithmic scale. Solid: median. Dashed: the slowest 1%.</figcaption>
+    <div id="c-gwlat"></div>
+    <div class="example"><b>Example</b>At 200 readings per second a reading is typically stored after 7.3 s from six gateways and 7.7 s from one place, and 1 in 100 waits more than 32 s or 34 s. At 300 per second the typical wait grows to 18 s and 42 s.</div>
+  </figure>
+  <p>The two curves are almost the same. Up to about 250 readings per second everything offered is stored, with a typical wait of 5 to 9 s. At 300 the waiting time jumps. A comfortable load is about 200 readings per second, where the typical wait is about 7 s and the slowest 1% wait about 32 s. The same holds for 12 gateways: at 400 offered they stored 290 per second.</p>
+  <div class="card-table scroll"><table>
+    <thead><tr><th>Overload test (15 minutes, 400 readings per second offered)</th><th class="n">Sent</th><th class="n">Stored per second, sustained</th><th class="n">Median wait</th></tr></thead>
+    <tbody>
+      <tr><td>6 gateways, 6 wallets (44 to 47 readings per second each)</td><td class="n">303</td><td class="n">291</td><td class="n">190 s</td></tr>
+      <tr><td>one place</td><td class="n">276</td><td class="n">272 to 283</td><td class="n">204 s</td></tr>
+    </tbody></table></div>
+  <p>Over 15 minutes the noise is gone: the chain stores about 280 readings per second with 100 readings per transaction, from one place or from six independent gateways, and the gateways get a fair share. The generators could not send the 400 offered: when the node's waiting room is full the submit command waits, so only 276 to 303 were sent.</p>
+  <figure>
+    <figcaption class="t">Readings stored per second for three batch sizes, six gateways</figcaption>
+    <figcaption class="s">Readings per transaction: 10, 100 and 300. 5-minute steps. At 300 readings per transaction the point at 250 is the mean of five runs.</figcaption>
+    <div id="c-gwbatch"></div>
+    <div class="example"><b>Example</b>Gateways that send 10 readings per transaction stop keeping up at about 180 readings per second: when they try 200 the chain stores 182. Gateways that send 300 per transaction still get 337 stored when they try 350.</div>
+  </figure>
+  <div class="card-table scroll"><table>
+    <thead><tr><th class="n">Readings per transaction</th><th class="n">Limit seen from the gateways</th><th class="n">Calculated limit (table above)</th></tr></thead>
+    <tbody>
+      <tr><td class="n">10</td><td class="n">about 180</td><td class="n">≈ 196</td></tr>
+      <tr><td class="n">100</td><td class="n">about 260 to 290</td><td class="n">≈ 280</td></tr>
+      <tr><td class="n">300</td><td class="n">at least 337</td><td class="n">≈ 300</td></tr>
+    </tbody></table></div>
+  <p>The batch size sets the capacity, as the calculation says. With 300 readings per transaction the measured values are above the calculated 300; five-minute windows vary by about ±13% with the number of blocks, so we only say "at least 337". No transaction was refused or lost, apart from one event described under "Trust".</p>
+
+  <h3>What a reading costs on mainnet (calculation, not a measurement)</h3>
+  <p>A transaction fee on Cardano mainnet is about 44 lovelace per byte plus 155,381 lovelace (1 ADA is 1,000,000 lovelace). These are the parameters as we remember them and should be checked against the current ones. Script costs and the price of ADA are not included. Our private testnet charges about 1 lovelace per byte, so the cost there is negligible.</p>
+  <div class="card-table scroll"><table>
+    <thead><tr><th class="n">Readings per transaction</th><th class="n">Size</th><th class="n">Fee per transaction</th><th class="n">Fee per reading</th><th class="n">Per day at 100 readings per second</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">285 B</td><td class="n">0.168 ADA</td><td class="n">0.168 ADA</td><td class="n">about 1,450,000 ADA</td></tr>
+      <tr><td class="n">10</td><td class="n">663 B</td><td class="n">0.185 ADA</td><td class="n">0.0185 ADA</td><td class="n">about 160,000 ADA</td></tr>
+      <tr><td class="n">100</td><td class="n">4,444 B</td><td class="n">0.351 ADA</td><td class="n">0.0035 ADA</td><td class="n">about 30,000 ADA</td></tr>
+      <tr><td class="n">300</td><td class="n">12,845 B</td><td class="n">0.721 ADA</td><td class="n">0.0024 ADA</td><td class="n">about 21,000 ADA</td></tr>
+      <tr><td class="n">only a hash of a batch, 1 transaction per minute</td><td class="n">about 300 B</td><td class="n">about 0.17 ADA</td><td class="n"></td><td class="n">about 240 ADA</td></tr>
+    </tbody></table></div>
+  <div class="example"><b>Example</b>A site sends 100 readings every second. With 100 readings per transaction that is one transaction per second at 0.351 ADA, so about 30,000 ADA per day. Storing only a hash of each minute's readings costs about 240 ADA per day, a hundred times less.</div>
+  <span class="trust warn">▲ Rough · the limit and the shape are clear; single steps are off by about 10%, 2-minute steps by about 20%</span>
   <div class="takeaway">One Cardano network of this kind takes a few hundred readings per second. Batching 100 or more readings per transaction is necessary; the waiting time then jumps from seconds to minutes at the limit, so the load should stay under about 70% of it.</div>
 </section>
 <section id="links">
@@ -541,6 +592,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
       <tr><td>The 2000 ms fork phase ran while pool 1 was cut off.</td><td>That row is not valid.</td><td>Marked "do not use".</td></tr>
       <tr><td>The first run of the clock skew test did not restore the node's clock between the offsets.</td><td>The wrong clocks added up (about 1, 3, 6, 11, 21 and 16 s instead of 1, 2, 3, 5, 10 and +5).</td><td>Found in the node's own logs. The test script now steps the clock back and checks it. The test was repeated twice more; section 9 uses the three repeats. One of them overlapped a 15-minute sleep of the Mac (the 12-hour <code>caffeinate</code> had run out), which only cost one sync time.</td></tr>
       <tr><td>In the failure tests the chain rate before each test, taken over 60 s, ranged from 5 to 20 blocks per minute.</td><td>The "before" rates in the summary file are not reliable.</td><td>This page quotes only the heal times and the rates during the outage.</td></tr>
+      <tr><td>In one 5-minute step (6 gateways, 300 readings per transaction, 250 readings per second) five gateways each had 10 or 11 transactions refused for 60 seconds in a row and gave up.</td><td>51 transactions were never accepted by their node. All five stopped at the same moment, about 3 minutes into the step. The sixth gateway and all other steps were fine.</td><td>The step was repeated four times and nothing was lost. We did not save the refusal messages the first time, so the cause is unknown. The script now keeps them.</td></tr>
       <tr><td>One fibre hop-2 join took 97 s instead of 47 s.</td><td>Other work (a test on a spare VM) used the same Mac.</td><td>The clean repetition is reported. Do not run other work during a measurement.</td></tr>
     </tbody></table></div>
   <p>Limits that apply to everything: all machines are VMs on one Mac, so CPU and disk are shared. Delay and loss are emulated on the sender side only. The chain is small and the pools are few. The "synced" test (newest block less than 20 s old) adds noise of up to 20 s when blocks come every 20 s, so the mainnet-like join times are only a baseline.</p>
@@ -556,6 +608,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>Why catch-up after an outage varies from 13 s to 143 s.</b> We think it is the node's own pause before it reconnects. Not confirmed in the logs.</div>
     <div><b>Why a full waiting room does not lose transactions.</b> The submit command seems to wait. We inferred it from the results.</div>
     <div><b>Why three nodes joining together were 2.6 and 3.3 times slower in two checkpoints.</b> Unknown.</div>
+    <div><b>What refused the transactions of five gateways at once.</b> One 5-minute step lost 51 transactions and four repeats lost none. The messages were not kept.</div>
     <div><b>Where healing stops.</b> A cut of 6 minutes heals and one of 15 minutes does not. The limit in between, expected near 60 blocks of the isolated pool's own fork, was not tested.</div>
   </div>
 </section>
@@ -567,8 +620,6 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     <div><b>A new block producer</b> Register a fourth pool on the running chain, give it stake, and measure the time until its first block and the effect on forks. This is how a new organisation would be allowed to write, and it takes about two epochs (100 minutes).</div>
     <div><b>A producer at the far end of a relay chain</b> A pool behind relays, so that its blocks travel up to the other pools. This is the realistic setup, and the per-hop rule of section 3 should apply to it.</div>
     <div><b>Smart-contract cost</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. It needs a validator tool installed.</div>
-    <div><b>Many gateways with their own wallets</b> Several gateway nodes on different VMs, each with its own key and funds, submit transactions at the same time. This measures capacity and waiting time for the realistic case, and shows what it takes to fund each gateway. The capacity test in section 6 submitted from one place only.</div>
-    <div><b>Fee per reading</b> The transaction fee for each batch size, as a cost per reading. It is a calculation from the fee parameters.</div>
     <div><b>Failures in between</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times to see their spread.</div>
   </div>
   <footer>
@@ -710,6 +761,19 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
     x:{label:'attempted',min:0,max:650,ticks:[0,100,200,300,400,500,600],unit:' readings/s'},y:{min:1,max:300,log:true,ticks:[1,3,10,30,100,300],label:'seconds (log scale)'},xTitle:'readings per second the generator tried to send',
     series:[{name:'100 per tx, median',color:'s1',pts:[[100,3.14],[200,4.68],[300,9.13],[400,29.7],[600,102.97]]},{name:'100 per tx, p90',color:'s1',dash:true,pts:[[100,8.81],[200,10.82],[300,18.33],[400,57.42],[600,165.5]]},
             {name:'300 per tx, median',color:'s2',pts:[[150,3.83],[300,13.24],[450,26.73],[600,43.64]]},{name:'300 per tx, p90',color:'s2',dash:true,pts:[[150,7.96],[300,20.27],[450,50.34],[600,117.91]]}]});
+
+  chart('c-gwcurve',{type:'line',aria:'Readings stored per second against readings tried, six gateways and one place',unit:' readings/s',
+    x:{label:'tried',min:50,max:300,ticks:[100,150,200,250,300],unit:' readings/s'},y:{min:0,max:300,ticks:[0,100,200,300],label:'readings stored per second'},xTitle:'readings per second the generators tried to send',
+    series:[{name:'all stored',ref:true,pts:[[50,50],[300,300]]},{name:'6 gateways, 6 wallets',color:'s1',pts:[[100,94.2],[150,148.2],[200,193.8],[250,248.6],[300,257.3]]},{name:'one place',color:'s2',pts:[[100,96.0],[150,137.7],[200,192.7],[250,242.0],[300,232.3]]}]});
+
+  chart('c-gwlat',{type:'line',aria:'Waiting time against the load, six gateways and one place, logarithmic',unit:' s',
+    x:{label:'tried',min:50,max:300,ticks:[100,150,200,250,300],unit:' readings/s'},y:{min:1,max:120,log:true,ticks:[1,3,10,30,100],label:'seconds (log scale)'},xTitle:'readings per second the generators tried to send',
+    series:[{name:'6 gateways, median',color:'s1',pts:[[100,3.21],[150,5.01],[200,7.29],[250,8.62],[300,18.18]]},{name:'6 gateways, slowest 1%',color:'s1',dash:true,pts:[[100,19.10],[150,18.19],[200,32.28],[250,37.66],[300,51.29]]},
+            {name:'one place, median',color:'s2',pts:[[100,3.71],[150,6.59],[200,7.66],[250,6.09],[300,42.07]]},{name:'one place, slowest 1%',color:'s2',dash:true,pts:[[100,24.86],[150,28.86],[200,34.28],[250,25.58],[300,93.0]]}]});
+
+  chart('c-gwbatch',{type:'line',aria:'Readings stored per second for three batch sizes, six gateways',unit:' readings/s',
+    x:{label:'tried',min:50,max:350,ticks:[100,150,200,250,300,350],unit:' readings/s'},y:{min:0,max:350,ticks:[0,100,200,300],label:'readings stored per second'},xTitle:'readings per second the generators tried to send',
+    series:[{name:'all stored',ref:true,pts:[[50,50],[350,350]]},{name:'10 readings per transaction',color:'s3',pts:[[100,96.1],[150,144.6],[200,181.9],[250,152.0]]},{name:'100 per transaction',color:'s1',pts:[[100,94.2],[150,148.2],[200,193.8],[250,248.6],[300,257.3]]},{name:'300 per transaction',color:'s2',pts:[[200,198.0],[250,229.0],[300,297.0],[350,337.0]]}]});
 
   chart('c-sat2',{type:'bar',aria:'Best readings per second with both parameter sets',unit:' readings/s',catTitle:'readings per transaction',
     cats:['100 per tx','300 per tx'],y:{min:0,max:400,ticks:[0,100,200,300,400],label:'readings stored per second'},

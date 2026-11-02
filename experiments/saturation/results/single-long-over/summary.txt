@@ -1,0 +1,6 @@
+batch   tx B  target  offered |  offered delivered |    p50    p90    p99 | backlog  lost rejects mempool KB
+                tx/s     tx/s |   read/s    read/s |      s      s      s |     txs   txs                   
+  100   4444       4     2.75 |    275.5     283.4 | 204.31 390.25 418.02 |      29     0       0        128
+
+best delivered readings/s per batch size: 100: 283
+(offered below the target = the generator could not keep up; delivered counts what was in a block before the submitting ended, so it is a little low at short durations)

@@ -1,0 +1,5 @@
+batch,rate_target_tx_s,tx_bytes,lanes,duration_s,txs_planned,offered_tx_s,offered_readings_s,confirmed_in_window,delivered_readings_s,backlog_end,confirmed_total,lost,rejections,last_confirm_s,lat_p50,lat_p90,lat_p99,lat_max,mempool_max_bytes
+100,1,4444,4,120,120,1.01,100.8,118,98.3,2,120,0,0,134,2.52,7.53,15.47,16.47,44438
+100,2,4444,4,120,240,1.99,199.0,201,167.5,29,240,0,0,131,8.75,17.00,19.76,20.14,128879
+100,3,4444,4,120,360,2.86,285.5,310,258.3,29,360,0,0,139,11.20,20.89,26.09,27.09,128879
+100,4,4444,4,120,480,3.95,394.9,442,368.3,29,480,0,0,126,8.20,13.52,20.24,21.49,128883

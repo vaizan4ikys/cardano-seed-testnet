@@ -29,7 +29,7 @@ sample() {
   ' 2>/dev/null
 }
 
-while [ ! -f "$OUT/stop-resources" ] && pgrep -f "[c]heckpoints.sh|[f]orks.sh|[r]un-all.sh|[a]symmetric.sh|[s]aturate.sh|[o]utsider.sh|[p]rofiles.sh" > /dev/null; do
+while [ ! -f "$OUT/stop-resources" ] && pgrep -f "[c]heckpoints.sh|[f]orks.sh|[r]un-all.sh|[a]symmetric.sh|[s]aturate.sh|[o]utsider.sh|[p]rofiles.sh|[g]ateways.sh|[n]ight5-queue" > /dev/null; do
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   for vm in $VMS; do
     ( set -- $(sample "$vm"); [ $# -eq 5 ] && echo "$now,$vm,$1,$2,$3,$4,$5" >> "$CSV" ) &

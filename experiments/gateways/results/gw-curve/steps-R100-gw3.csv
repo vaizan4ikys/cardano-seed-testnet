@@ -1,0 +1,2 @@
+batch,rate_target_tx_s,tx_bytes,lanes,duration_s,txs_planned,offered_tx_s,offered_readings_s,confirmed_in_window,delivered_readings_s,backlog_end,confirmed_total,lost,rejections,last_confirm_s,lat_p50,lat_p90,lat_p99,lat_max,mempool_max_bytes
+100,0.1667,4440,1,300,51,0.17,17.0,47,15.7,4,51,0,0,308,3.10,11.37,19.11,19.11,17772

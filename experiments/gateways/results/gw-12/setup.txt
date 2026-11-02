@@ -1,0 +1,3 @@
+date: 2026-11-01T23:26:53Z    gateways: 12    readings per tx: 100    totals: 200 400    duration: 120 s
+chain at start: {"block":610,"epoch":1,"era":"Conway","hash":"f4c06ae0579f16ec2e91e9aefb59a3db808aafe582b7e36d4add6ae23be6824e","slot":3102,"slotInEpoch":102,"slotsToEpochEnd":2898,"syncProgress":"100.00"}
+funded 12 gateways with 100000000 lovelace each (transaction 37f7930c0c994d997e543aab4d608a322622bf96ed82f2bd5fe676d0f5d9d783)

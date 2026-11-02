@@ -1,0 +1,3 @@
+date: 2026-11-02T00:54:29Z    commit: 2256baf    steps: 100:4    duration: 900 s
+chain at start: {"block":1652,"epoch":2,"era":"Conway","hash":"423432befa2d0fc344da67e8b8abf5aaecea1482df5a5388faa1f9ba73f31129","slot":8358,"slotInEpoch":2358,"slotsToEpochEnd":642,"syncProgress":"100.00"}
+pool machine: 2 CPU, 3919 MiB RAM

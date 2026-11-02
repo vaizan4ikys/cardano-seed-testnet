@@ -82,7 +82,7 @@ for total in $TOTALS; do
   rate=$(awk -v t="$total" -v b="$B" -v g="$GATEWAYS" 'BEGIN { printf "%.4f", t / (b * g) }')       # transactions per second per gateway
   n=$(awk -v r="$rate" -v d="$DURATION" 'BEGIN { printf "%d", r * d + 1 }')
   echo "== $total readings/s in total: $GATEWAYS gateways x $rate tx/s x $B readings, $DURATION s"
-  START=$(( $(on "$POOL" 'date +%s') + 30 + n * 2 ))        # the same start for all, after they have built their transactions
+  START=$(( $(on "$POOL" 'date +%s') + 30 + n / 2 ))        # the same start for all, after they have built their transactions (about 20 per second)
   pids=()
   for k in $(seq "$GATEWAYS"); do
     vm=$(vm_of "$k")
@@ -94,6 +94,9 @@ for total in $TOTALS; do
     vm=$(vm_of "$k")
     tail -2 "$OUT/.step-$total-$k" > "$OUT/steps-R$total-gw$k.csv"
     on "$vm" "docker exec gw$k cat /tmp/sat/step/txs.csv" > "$OUT/txs-R$total-gw$k.csv"
+    on "$vm" "docker exec gw$k cat /tmp/sat/step/rejects.log" > "$OUT/rejects-R$total-gw$k.log" 2>/dev/null || true
+    [ -s "$OUT/rejects-R$total-gw$k.log" ] || rm -f "$OUT/rejects-R$total-gw$k.log"
+    [ "$(tail -2 "$OUT/steps-R$total-gw$k.csv" | tail -1 | cut -d, -f13)" = 0 ] || on "$vm" "docker logs gw$k 2>&1 | tail -300" > "$OUT/nodelog-R$total-gw$k.log"
   done
   rm -f "$OUT"/.step-*
   for _ in $(seq 120); do [ "$(mempool)" = 0 ] && break; sleep 5; done
