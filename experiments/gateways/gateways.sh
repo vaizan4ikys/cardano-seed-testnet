@@ -24,22 +24,29 @@ B=${B:-100}                                   # readings per transaction
 TOTALS=${TOTALS:-"100 200 300 400"}           # readings per second, all gateways together
 DURATION=${DURATION:-120}
 FUND=${FUND:-100000000}                       # lovelace per gateway (100 ADA)
+DEPTHS=${DEPTHS:-1}                           # hops behind the pool of gateway 1, 2, 3 ... (repeats): 1 = dials the pool, 3 = pool -> relay -> relay -> gateway
+DELAY=${DELAY:-0}                             # ms added to what every relay and gateway sends
 MAGIC=${MAGIC:-42}
 REPO=cardano-seed-testnet
 VMS=(seedvm2 seedvm3 seedvm4)
+RVMS=(seedvm2 seedvm4 seedvm3)                # machine of relay 1, 2, 3 (the same layout as ../measure/hops.sh)
+DEP=($DEPTHS)
+depth_of() { echo "${DEP[$(( ($1 - 1) % ${#DEP[@]} ))]}"; }
+MAXD=1; for d in "${DEP[@]}"; do [ "$d" -gt "$MAXD" ] && MAXD=$d; done
+[ "$MAXD" -le 4 ] || { echo "at most 4 hops (3 relays)"; exit 1; }
 OUT=${OUT:-$HERE/results/gateways-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"
 
 on() { local vm=$1; shift; ssh -A -o BatchMode=yes "$vm" "cd $REPO && $*" 2> >(grep -v '^\*\*' >&2); }
 ip_of() { ssh -o BatchMode=yes "$1" hostname -I 2>/dev/null | cut -d' ' -f1; }
 vm_of() { echo "${VMS[$(( ($1 - 1) % ${#VMS[@]} ))]}"; }
-stop_all() { for vm in "${VMS[@]}"; do on "$vm" 'docker rm -f $(docker ps -aq --filter name=gw) >/dev/null 2>&1; true' >/dev/null 2>&1 || true; done; }
+stop_all() { for vm in "${VMS[@]}"; do on "$vm" 'docker rm -f $(docker ps -aq --filter name=gw) $(docker ps -aq --filter name=hop) >/dev/null 2>&1; true' >/dev/null 2>&1 || true; done; }
 trap stop_all EXIT
 mempool() { on "$POOL" 'source scripts/lib.sh && docker exec $(pool_container 1) cardano-cli conway query tx-mempool info --socket-path /node.socket --testnet-magic $MAGIC' | jq -r .numberOfTxs; }
 
 [ "$(on "$POOL" './experiments/load/load.sh status' | head -1)" = running ] && { echo "the load is running: stop it first"; exit 1; }
 POOL_IP=$(ip_of "$POOL")
-{ echo "date: $(date -u +%FT%TZ)    gateways: $GATEWAYS    readings per tx: $B    totals: $TOTALS    duration: $DURATION s"
+{ echo "date: $(date -u +%FT%TZ)    gateways: $GATEWAYS    readings per tx: $B    totals: $TOTALS    duration: $DURATION s    depths: $DEPTHS    delay: $DELAY ms"
   echo "chain at start: $(on "$POOL" 'source scripts/lib.sh && tip_of 1')"; } | tee "$OUT/setup.txt"
 
 # machines: scripts and chain files
@@ -49,9 +56,19 @@ for vm in "${VMS[@]}"; do
 done
 stop_all
 
-# 1. the gateway nodes
+# 1. the relays (a chain behind pool 1, only if some gateway sits deeper than hop 1), then the gateway nodes
+for ((j = 1; j < MAXD; j++)); do
+  rvm=${RVMS[$((j - 1))]}
+  if [ "$j" = 1 ]; then pip=$POOL_IP; else pip=$(ip_of "${RVMS[$((j - 2))]}"); fi
+  on "$rvm" "NAME=hop$j LISTEN=1 DELAY=$DELAY TIMEOUT=600 ./experiments/measure/sync-time.sh $pip 3001" >/dev/null || { echo "relay hop$j did not sync"; exit 1; }
+done
+[ "$MAXD" -gt 1 ] && echo "$((MAXD - 1)) relays are synced"
+: > "$OUT/depths.txt"
 for k in $(seq "$GATEWAYS"); do
-  on "$(vm_of "$k")" "NAME=gw$k TIMEOUT=600 ./experiments/measure/sync-time.sh $POOL_IP 3001" >/dev/null || { echo "gw$k did not sync"; exit 1; }
+  d=$(depth_of "$k")
+  if [ "$d" = 1 ]; then peer=$POOL_IP; else peer=$(ip_of "${RVMS[$((d - 2))]}"); fi
+  echo "$k $d $(vm_of "$k")" >> "$OUT/depths.txt"
+  on "$(vm_of "$k")" "NAME=gw$k DELAY=$DELAY TIMEOUT=600 ./experiments/measure/sync-time.sh $peer 3001" >/dev/null || { echo "gw$k did not sync"; exit 1; }
 done
 echo "$GATEWAYS gateway nodes are synced"
 

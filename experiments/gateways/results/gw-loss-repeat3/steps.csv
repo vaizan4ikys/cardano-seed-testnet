@@ -1,0 +1,4 @@
+total_readings_s_target,gateways,batch,offered_readings_s,delivered_readings_s,confirmed_rate_readings_s,delivered_min_gw,delivered_max_gw,lost,rejections,lat_p50,lat_p90,lat_p99,lat_max,mempool_max_bytes
+200,6,300,205.8,198.0,195.8,33.0,33.0,0,0,5.23,20.18,29.19,32.07,51376
+250,6,300,256.2,252.0,266.0,42.0,42.0,0,0,12.47,23.01,30.31,35.63,64220
+300,6,300,306.0,286.0,282.5,47.0,48.0,0,0,6.38,16.34,27.26,27.27,51376

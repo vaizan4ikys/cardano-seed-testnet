@@ -30,7 +30,8 @@ for node in $NODES; do
     cleanup
     on "$HOP1" "LISTEN=1 ./experiments/measure/sync-time.sh $POOL_IP" >/dev/null
     [ "$hops" = 2 ] && on "$HOP2" "./experiments/measure/sync-time.sh $HOP1_IP" >/dev/null
-    res=$(on "$node" "./experiments/measure/catchup.sh $outage")
+    res=$(on "$node" "TRACE=/tmp/catchup-trace.csv ./experiments/measure/catchup.sh $outage")
+    ssh -o BatchMode=yes "$node" cat /tmp/catchup-trace.csv > "$OUT/trace-$node-$outage-$(date +%H%M%S).csv" 2>/dev/null || true   # bytes received after the reconnect, twice a second
     echo "  $res"
     read -r o b c m <<< "$res"
     echo "$node,$hops,$o,$b,$c,$m" >> "$OUT/outage.csv"
