@@ -5,6 +5,7 @@
 #   ./scripts/gen-testnet.sh          network 1
 #   NET=2 ./scripts/gen-testnet.sh    network 2
 #   PARAMS=mainnet ./scripts/gen-testnet.sh    mainnet-like chain parameters (see spec/README.md)
+#   PV=9 ./scripts/gen-testnet.sh              protocol version 9 (needed for Plutus V3 scripts; default 2)
 #
 # The chain's start time is set 20 s from now, so all nodes agree on when it begins.
 # The nodes must be started soon after (see "start-time window" in the README).
@@ -33,6 +34,17 @@ import json, sys
 s = json.load(open(sys.argv[1]))
 s.update(activeSlotsCoeff=0.05, securityParam=2160, epochLength=432000)
 s["protocolParams"]["maxBlockBodySize"] = 90112
+json.dump(s, open(sys.argv[1], "w"), indent=2)
+EOP
+fi
+
+# PV=9: protocol version 9 instead of 2 (Plutus V3 scripts need version 9 or higher); everything else stays as in spec/
+if [ -n "${PV:-}" ]; then
+  if [ "$SPEC" = "$ROOT/spec" ]; then SPEC=$BUILD/spec-pv; rm -rf "$SPEC"; cp -r "$ROOT/spec" "$SPEC"; fi
+  python3 - "$SPEC/shelley-spec.json" "$PV" <<'EOP'
+import json, sys
+s = json.load(open(sys.argv[1]))
+s["protocolParams"]["protocolVersion"] = {"major": int(sys.argv[2]), "minor": 0}
 json.dump(s, open(sys.argv[1], "w"), indent=2)
 EOP
 fi
