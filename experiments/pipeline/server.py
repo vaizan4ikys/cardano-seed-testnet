@@ -76,19 +76,26 @@ def main():
     ap.add_argument("--container", default=None, help="pool 1 container name (default: found with docker ps)")
     ap.add_argument("--magic", type=int, default=42)
     ap.add_argument("--receipt-policy", default=None, help="policy id of the RECEIPT token (default: any policy)")
+    ap.add_argument("--registry-dir", default="/tmp/p0n", help="directory in pool 1's container with admin.addr, policy.id, token.hex "
+                    "(the registry coin is read through Kupo so the page can show who is approved); 'none' = do not read the registry")
     ap.add_argument("--page", default=os.path.join(HERE, "page.html"))
     a = ap.parse_args()
     if a.poll < 1 or a.tip_interval < 1:
         ap.error("--poll and --tip-interval must be at least 1 second")
 
     gateways = reader.load_gateways(a.gateways_file)
-    rd = reader.Reader(reader.KupoClient(a.kupo), reader.DockerTip(a.container, a.magic), gateways=gateways,
+    kc = reader.KupoClient(a.kupo)
+    registry = None if a.registry_dir == "none" else reader.Registry(kc, a.registry_dir, a.container)
+    rd = reader.Reader(kc, reader.DockerTip(a.container, a.magic), gateways=gateways, registry=registry,
                        final_depth=a.final_depth, window=a.window, silent_after=a.silent_after,
                        limits=reader.parse_limits(a.limits), receipt_policy=a.receipt_policy, kupo_url=a.kupo)
     print("gateways: %s" % (", ".join(sorted(gateways)) or "none (file %s)" % a.gateways_file), flush=True)
     stop = threading.Event()
     rd.poll_tip()           # first tip before the first Kupo round, so old batches get a depth estimate at once
-    threads = [threading.Thread(target=reader.run_loop, args=(rd.poll_once, a.poll, stop), daemon=True),
+    threads = [threading.Thread(target=reader.run_loop, args=(rd.poll_once, a.poll, stop), daemon=True)]
+    if registry:
+        threads.append(threading.Thread(target=reader.run_loop, args=(registry.poll, 3.0, stop), daemon=True))
+    threads += [
                threading.Thread(target=reader.run_loop, args=(rd.poll_tip, a.tip_interval, stop), daemon=True)]
     for t in threads:
         t.start()

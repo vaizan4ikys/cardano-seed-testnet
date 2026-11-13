@@ -9,7 +9,7 @@
 set -eu
 MAGIC=${1:?usage: p1-enroll.sh <magic> A|B}; G=${2:?usage: p1-enroll.sh <magic> A|B}
 ACTION=${P1_ACTION:-add}
-case "$G" in A|B) ;; *) echo "gateway must be A or B"; exit 1;; esac
+case "$G" in A|B|G[0-9]*) ;; *) echo "gateway must be A, B or G<number> (a site gateway of experiments/multisite)"; exit 1;; esac
 . /tmp/p0-scripts/p0-lib.sh                       # sets W (= $P0_DIR), cli, swap_registry, wait_tx ...
 T0=$(now_ms)
 # one registry change at a time (a second one would spend the same coin)

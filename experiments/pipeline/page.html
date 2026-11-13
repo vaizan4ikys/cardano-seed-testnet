@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sensor data from the chain</title>
+<title>Sensor data on the blockchain</title>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --text: #1c2430; --muted: #5d6877; --line: #dde1e7;
@@ -19,117 +19,163 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
-           padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
-  header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; }
-  .stat { display: flex; flex-direction: column; line-height: 1.25; }
-  .stat small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  .stat b { font-size: 14px; font-variant-numeric: tabular-nums; }
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 12px 20px 0; }
+  .top { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+  header h1 { font-size: 18px; margin: 0 8px 0 0; font-weight: 650; }
+  .kpi { display: flex; flex-direction: column; line-height: 1.2; }
+  .kpi small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .conn { margin-left: auto; font-size: 13px; color: var(--muted); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bar); margin-right: 6px; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+  nav { display: flex; gap: 4px; margin-top: 10px; }
+  nav button { font: inherit; font-weight: 600; background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 14px;
+               color: var(--muted); cursor: pointer; }
+  nav button.on { color: var(--accent); border-bottom-color: var(--accent); }
   main { max-width: 1280px; margin: 0 auto; padding: 16px 20px 40px; }
+  .tab { display: none; } .tab.on { display: block; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; padding: 14px 16px; }
-  h2 { font-size: 15px; margin: 0 0 4px; }
-  p.sub { margin: 0 0 10px; color: var(--muted); font-size: 12.5px; }
+  h2 { font-size: 16px; margin: 0 0 4px; }
+  h3 { font-size: 14px; margin: 14px 0 8px; }
+  p.sub { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
        font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   tr:last-child td { border-bottom: 0; }
   td.num, th.num { text-align: right; }
-  tbody.pick tr { cursor: pointer; }
-  tbody.pick tr:hover td { background: var(--info-bg); }
-  tr.sel td { background: var(--info-bg); }
-  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
-  .muted { color: var(--muted); }
-  .small { font-size: 12px; }
-  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-right: 4px; white-space: nowrap; }
-  .b-ok { background: var(--ok-bg); color: var(--ok); }
-  .b-warn { background: var(--warn-bg); color: var(--warn); }
-  .b-bad { background: var(--bad-bg); color: var(--bad); }
-  .b-info { background: var(--info-bg); color: var(--accent); }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12.5px; font-weight: 600; margin-right: 4px; white-space: nowrap; }
+  .b-ok { background: var(--ok-bg); color: var(--ok); } .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-bad { background: var(--bad-bg); color: var(--bad); } .b-info { background: var(--info-bg); color: var(--accent); }
   .b-plain { background: var(--bar); color: var(--text); }
   .bar { display: inline-block; width: 110px; height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; vertical-align: middle; margin-right: 8px; }
-  .bar i { display: block; height: 100%; background: var(--accent); }
-  .bar i.final { background: var(--ok); }
-  .bar i.gone { background: var(--bad); }
+  .bar.wide { width: 100%; max-width: 420px; height: 12px; border-radius: 6px; margin: 6px 0 2px; display: block; }
+  .bar i { display: block; height: 100%; background: var(--accent); } .bar i.final { background: var(--ok); }
   .banner { display: none; background: var(--bad-bg); color: var(--bad); padding: 8px 20px; font-weight: 600; }
-  .banner.show { display: block; }
-  .banner.warn { background: var(--warn-bg); color: var(--warn); }
-  #chartbox { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; display: none; position: relative; }
+  .banner.show { display: block; } .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .gh { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; margin: 6px 0 8px; }
+  .gh b { font-size: 15px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px 8px; cursor: pointer; background: var(--panel); }
+  .card:hover { border-color: var(--accent); } .card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--info-bg); }
+  .card.dim .val { opacity: .45; }
+  .card .row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .card .name { font-size: 12.5px; color: var(--muted); }
+  .card .val { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .card .val small { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .card svg { width: 100%; height: 30px; display: block; margin-top: 2px; }
+  .card svg path { fill: none; stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .card.dim svg path { stroke: var(--bar); }
+  #chartbox { display: none; position: relative; }
   #chartbox.show { display: block; }
   #chart { width: 100%; height: 300px; display: block; cursor: crosshair; touch-action: pan-y; }
   #chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
   #chart .grid { stroke: var(--line); stroke-width: 1; }
   #chart .lim { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 5 4; opacity: .7; }
   #chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
-  #chart .dot { fill: var(--accent); }
-  #chart .dot.oor { fill: var(--bad); }
+  #chart .dot { fill: var(--accent); } #chart .dot.oor { fill: var(--bad); }
   #chart .cross { stroke: var(--muted); stroke-width: 1; }
-  #chart .hdot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
-  #chart .hdot.oor { fill: var(--bad); }
+  #chart .hdot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; } #chart .hdot.oor { fill: var(--bad); }
   #tip2 { position: absolute; display: none; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
           border-radius: 6px; padding: 6px 9px; font-size: 12.5px; box-shadow: 0 2px 10px rgba(0,0,0,.18); white-space: nowrap; z-index: 4; }
   #tip2 b { font-size: 15px; font-variant-numeric: tabular-nums; }
   .facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 4px 0 2px; }
-  .facts span { color: var(--muted); font-size: 12.5px; } .facts b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .facts span { color: var(--muted); font-size: 13px; } .facts b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .big { display: flex; flex-wrap: wrap; gap: 8px 36px; margin: 6px 0 4px; }
+  .big div { line-height: 1.2; } .big b { font-size: 26px; font-variant-numeric: tabular-nums; } .big small { display: block; color: var(--muted); }
+  button.verify { font: inherit; font-size: 12.5px; padding: 2px 10px; border: 1px solid var(--accent); color: var(--accent); background: none; border-radius: 6px; cursor: pointer; }
+  button.verify:hover { background: var(--info-bg); }
+  tr.detail td { background: var(--info-bg); font-size: 13px; }
+  tr.detail dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; }
+  tr.detail dt { color: var(--muted); } tr.detail dd { margin: 0; }
   .empty { color: var(--muted); padding: 10px 2px; }
   .wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Sensor data from the chain</h1>
-  <div class="stat"><small>Chain tip</small><b id="tip">-</b></div>
-  <div class="stat"><small>Indexer (Kupo)</small><b id="kupo">-</b></div>
-  <div class="stat"><small>Server time (UTC)</small><b id="stime">-</b></div>
-  <div class="stat"><small>Batches / readings</small><b id="counts">-</b></div>
+  <div class="top">
+    <h1>Sensor data on the blockchain</h1>
+    <div class="kpi"><small>Sensors live</small><b id="k-live">-</b></div>
+    <div class="kpi"><small>Readings stored permanently</small><b id="k-final">-</b></div>
+    <div class="kpi"><small>Approved gateways</small><b id="k-gw">-</b></div>
+    <div class="conn" id="conn">-</div>
+  </div>
+  <nav>
+    <button data-tab="sensors" class="on">Sensors</button>
+    <button data-tab="trust">Trust</button>
+    <button data-tab="details">Details</button>
+  </nav>
 </header>
 <div id="banner" class="banner"></div>
 
 <main>
-  <section>
-    <h2>Sensors</h2>
-    <p class="sub">The alarm "silent" counts seconds on the server clock since a new reading last arrived from the chain.
-       Click a sensor to see its values; move the mouse over the graph to read a value.</p>
-    <div class="wrap">
-    <table>
-      <thead><tr><th>Sensor</th><th>Kind</th><th class="num">Latest value</th><th class="num">Age</th>
-        <th>Last reading (sensor clock, UTC)</th><th class="num">Readings</th><th>Flags</th></tr></thead>
-      <tbody id="sensors" class="pick"></tbody>
-    </table>
-    </div>
-    <div id="chartbox">
+  <div class="tab on" id="tab-sensors">
+    <section id="chartbox">
       <b id="charttitle"></b> <span class="muted small" id="chartnote"></span>
       <div class="facts" id="facts"></div>
       <svg id="chart" viewBox="0 0 900 300" role="img" aria-label="Recent values of the selected sensor"></svg>
       <div id="tip2"></div>
-    </div>
-  </section>
+    </section>
+    <p class="sub">Every value shown here was read back from the blockchain, not from the sensor. Click a sensor to see its graph. "Silent" means no new reading
+       arrived for <span id="sa">90</span> seconds.</p>
+    <div id="groups"></div>
+  </div>
 
-  <section>
-    <h2>Latest batches</h2>
-    <p class="sub">A batch is one transaction with many readings. <b>Depth</b> = blocks on top of the block that holds it.
-       At <span id="fd">60</span> blocks it is <b>final</b>: it cannot be rolled back any more. Only the newest are listed:
-       <span id="olderfinal"></span></p>
-    <div class="wrap">
-    <table>
-      <thead><tr><th>Gateway (signer)</th><th class="num">Batch no.</th><th class="num">Readings</th><th>Seen</th><th class="num">Block</th>
-        <th>Depth</th><th>Transaction</th><th>Warnings</th></tr></thead>
-      <tbody id="batches"></tbody>
-    </table>
-    </div>
-  </section>
+  <div class="tab" id="tab-trust">
+    <section>
+      <h2>Who may send data?</h2>
+      <p class="sub">The list of approved gateways is stored on the blockchain and checked by a smart contract for every batch.
+         A gateway that is not on the list is refused: its data never reaches the chain. <span id="reginfo"></span></p>
+      <div class="wrap"><table>
+        <thead><tr><th>Gateway</th><th>Status</th><th class="num">Batches stored</th><th class="num">Readings stored</th><th class="num">Last data</th></tr></thead>
+        <tbody id="gw-trust"></tbody>
+      </table></div>
+    </section>
+    <section>
+      <h2>Is the stored data safe?</h2>
+      <p class="sub">A batch is first "settling": it is in a block, but a rare rollback could still move it. After <span id="fd">60</span> more blocks it is
+         <b>final</b>: it can no longer be changed or removed by anyone.</p>
+      <div class="big">
+        <div><b id="t-final">-</b><small>batches final</small></div>
+        <div><b id="t-settling">-</b><small>settling</small></div>
+        <div><b id="t-back">-</b><small>rolled back</small></div>
+      </div>
+      <span class="bar wide"><i id="t-bar" class="final" style="width:0"></i></span>
+      <h3>Latest batches <span class="muted small">(click "Verify" to see the proof)</span></h3>
+      <div class="wrap"><table>
+        <thead><tr><th>Arrived</th><th>Gateway</th><th class="num">Readings</th><th>Status</th><th></th></tr></thead>
+        <tbody id="batches-trust"></tbody>
+      </table></div>
+    </section>
+  </div>
 
-  <section>
-    <h2>Gateways</h2>
-    <div class="wrap">
-    <table>
-      <thead><tr><th>Name</th><th>Wallet address</th><th class="num">Batches</th><th class="num">Readings</th>
-        <th class="num">Last batch seen</th><th class="num">Receipts</th></tr></thead>
-      <tbody id="gateways"></tbody>
-    </table>
-    </div>
-  </section>
+  <div class="tab" id="tab-details">
+    <section>
+      <h2>System</h2>
+      <div class="wrap"><table><tbody id="sysinfo"></tbody></table></div>
+    </section>
+    <section>
+      <h2>Latest batches (technical)</h2>
+      <p class="sub">Depth = blocks on top of the block that holds the batch. <span id="olderfinal"></span></p>
+      <div class="wrap"><table>
+        <thead><tr><th>Gateway (signer)</th><th class="num">Batch no.</th><th class="num">Readings</th><th>Seen</th><th class="num">Block</th>
+          <th>Depth</th><th>Transaction</th><th>Warnings</th></tr></thead>
+        <tbody id="batches"></tbody>
+      </table></div>
+    </section>
+    <section>
+      <h2>Gateways (technical)</h2>
+      <div class="wrap"><table>
+        <thead><tr><th>Name</th><th>Wallet address</th><th class="num">Batches</th><th class="num">Readings</th>
+          <th class="num">Last batch seen</th><th class="num">Receipts</th></tr></thead>
+        <tbody id="gateways"></tbody>
+      </table></div>
+    </section>
+  </div>
 </main>
 
 <script>
@@ -137,8 +183,8 @@
   "use strict";
   var selected = null;       // key of the selected sensor: "sensor|kind" (can be given in the address as #AGRI_001|temperature)
   try { if (location.hash.length > 1) selected = decodeURIComponent(location.hash.slice(1)); } catch (e) { selected = null; }
-  var last = null;           // last good answer
-  var failed = false;
+  var last = null, failed = false, openTx = {}, tab = "sensors";
+  try { var q = /[?&]tab=(sensors|trust|details)/.exec(location.search); if (q) tab = q[1]; } catch (e) {}
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -147,13 +193,11 @@
     });
   }
   function two(n) { return (n < 10 ? "0" : "") + n; }
-  function clock(epoch) {            // epoch seconds -> HH:MM:SS UTC (formatting only, no use of the browser clock)
+  function clock(epoch) {
     var d = new Date(epoch * 1000);
     return two(d.getUTCHours()) + ":" + two(d.getUTCMinutes()) + ":" + two(d.getUTCSeconds());
   }
-  function dateclock(epoch) {
-    return new Date(epoch * 1000).toISOString().slice(0, 10) + " " + clock(epoch);
-  }
+  function dateclock(epoch) { return new Date(epoch * 1000).toISOString().slice(0, 10) + " " + clock(epoch); }
   function dur(s) {
     if (s === null || s === undefined) return "-";
     s = Math.max(0, Math.round(s));
@@ -166,83 +210,149 @@
   function badge(cls, text, title) {
     return "<span class=\"badge " + cls + "\"" + (title ? " title=\"" + esc(title) + "\"" : "") + ">" + esc(text) + "</span>";
   }
+  function approvedBadge(a) {
+    if (a === true) return badge("b-ok", "✔ Approved", "on the list of the smart contract: its data is accepted");
+    if (a === false) return badge("b-bad", "✖ Not approved", "not on the list: the contract refuses its data, nothing reaches the chain");
+    return badge("b-plain", "list unknown", "the approved-gateway list could not be read from the chain");
+  }
+  function kindName(k) { return k.replace("_", " "); }
 
+  // ------------------------------------------------------------------ header
   function renderTop(s) {
-    var t = s.tip;
-    $("tip").textContent = t ? "block " + t.block + " (slot " + t.slot + ")" : "unknown" + (s.tip_error ? " - node not reachable" : "");
-    var k = s.kupo;
-    if (k.ok) {
-      var h = k.health || {};
-      $("kupo").innerHTML = badge("b-ok", "ok") + " <span class=\"small muted\">slot " + esc(h.checkpoint) + "</span>";
-    } else {
-      $("kupo").innerHTML = badge("b-bad", "indexer unreachable", k.error) +
-        (k.last_ok_age === null ? "" : " <span class=\"small muted\">last answer " + dur(k.last_ok_age) + " ago</span>");
-    }
-    $("stime").textContent = dateclock(s.server_time);
-    var c = s.counts;
-    $("counts").textContent = c.batches + " / " + c.readings;
-    $("fd").textContent = s.final_depth;
+    var live = 0, total = s.sensors.length;
+    s.sensors.forEach(function (x) { if (!x.silent) live++; });
+    $("k-live").textContent = live + " of " + total;
+    $("k-final").textContent = s.counts.final_readings;
+    var ap = 0, known = false, n = 0;
+    s.gateways.forEach(function (g) { if (g.name) { n++; if (g.approved === true) ap++; if (g.approved !== null) known = true; } });
+    $("k-gw").textContent = known ? ap + " of " + n : "-";
+    var ok = s.tip && !s.tip_error && s.kupo.ok;
+    $("conn").innerHTML = "<span class=\"dot " + (ok ? "ok" : "bad") + "\"></span>" +
+      (ok ? "Blockchain connected · block " + s.tip.block : "Blockchain not reachable");
+    $("fd").textContent = s.final_depth; $("sa").textContent = s.silent_after;
   }
 
+  // ------------------------------------------------------------------ sensors tab
+  function spark(points) {
+    var p = points.slice(-40), n = p.length;
+    if (n < 2) return "<svg viewBox=\"0 0 100 30\" preserveAspectRatio=\"none\"></svg>";
+    var lo = Infinity, hi = -Infinity;
+    p.forEach(function (q) { lo = Math.min(lo, q[1]); hi = Math.max(hi, q[1]); });
+    var d = hi - lo || 1;
+    return "<svg viewBox=\"0 0 100 30\" preserveAspectRatio=\"none\"><path d=\"" + p.map(function (q, i) {
+      return (i ? "L" : "M") + (i / (n - 1) * 100).toFixed(1) + " " + (28 - (q[1] - lo) / d * 26).toFixed(1);
+    }).join(" ") + "\"/></svg>";
+  }
   function renderSensors(s) {
-    var rows = [];
+    var gws = {}, order = [];
     s.sensors.forEach(function (x) {
-      var key = x.sensor + "|" + x.kind;
-      var flags = "";
-      if (x.out_of_range) flags += badge("b-bad", "out of range", "latest value is outside " + (s.limits[x.kind] || []).join(" .. "));
-      if (x.silent) flags += badge("b-warn", "silent", "no new reading from the chain for more than " + s.silent_after + " s (server clock)");
-      if (!flags) flags = badge("b-ok", "ok");
-      if (x.out_of_range_count > 0 && !x.out_of_range) flags += badge("b-plain", x.out_of_range_count + " earlier out of range");
-      var skew = Math.abs(x.age_sensor_clock - x.seen_age) > 120;
-      rows.push("<tr data-key=\"" + esc(key) + "\"" + (key === selected ? " class=\"sel\"" : "") + ">" +
-        "<td><b>" + esc(x.sensor) + "</b></td><td>" + esc(x.kind.replace("_", " ")) + "</td>" +
-        "<td class=\"num\"><b>" + esc(x.text) + "</b> " + esc(x.unit) + "</td>" +
-        "<td class=\"num\">" + dur(x.seen_age) + "</td>" +
-        "<td>" + dateclock(x.last_ts) + (skew ? " <span class=\"muted small\" title=\"the sensor clock is " + dur(x.age_sensor_clock) +
-          " behind the server clock, but the last reading arrived " + dur(x.seen_age) + " ago\">(clock differs)</span>" : "") + "</td>" +
-        "<td class=\"num\">" + x.count + "</td><td>" + flags + "</td></tr>");
+      var g = x.gateway || "unknown";
+      if (!gws[g]) { gws[g] = []; order.push(g); }
+      gws[g].push(x);
     });
-    $("sensors").innerHTML = rows.length ? rows.join("") : "<tr><td colspan=\"7\" class=\"empty\">No sensor readings yet.</td></tr>";
+    order.sort();
+    var appr = {}, st = {};
+    s.gateways.forEach(function (g) { if (g.name) { appr[g.name] = g.approved; st[g.name] = g; } });
+    var out = [];
+    order.forEach(function (g) {
+      var list = gws[g], live = list.filter(function (x) { return !x.silent; }).length;
+      out.push("<div class=\"gh\"><b>Gateway " + esc(g) + "</b>" + approvedBadge(appr[g] === undefined ? null : appr[g]) +
+        "<span class=\"muted small\">" + live + " of " + list.length + " sensors live</span></div><div class=\"grid\">");
+      list.forEach(function (x) {
+        var key = x.sensor + "|" + x.kind, pill;
+        if (x.silent) pill = badge("b-warn", "Silent", "no new reading from the chain for more than " + s.silent_after + " s (server clock)");
+        else if (x.out_of_range) pill = badge("b-bad", "Out of range", "outside " + (s.limits[x.kind] || []).join(" .. "));
+        else pill = badge("b-ok", "Live");
+        out.push("<div class=\"card" + (key === selected ? " sel" : "") + (x.silent ? " dim" : "") + "\" data-key=\"" + esc(key) + "\">" +
+          "<div class=\"row\"><span class=\"name\">" + esc(x.sensor) + " · " + esc(kindName(x.kind)) + "</span>" + pill + "</div>" +
+          "<div class=\"val\">" + esc(x.text) + " <small>" + esc(x.unit) + "</small></div>" + spark(x.points) +
+          "<div class=\"muted small\">" + (x.silent ? "last value " : "updated ") + dur(x.seen_age) + " ago</div></div>");
+      });
+      out.push("</div>");
+    });
+    $("groups").innerHTML = out.length ? out.join("") : "<div class=\"empty\">No sensor readings on the chain yet.</div>";
   }
 
-  var SHOW_BATCHES = 8;
-  function renderBatches(s) {
-    var rows = [], list = s.batches.slice(0, SHOW_BATCHES);
+  // ------------------------------------------------------------------ trust tab
+  function statusCell(b, fd) {
+    if (b.status === "rolled back") return badge("b-bad", "Rolled back", "this batch was removed by a chain reorganisation");
+    var w = b.warnings.map(function (x) { return badge("b-bad", x); }).join("");
+    if (b.status === "final") return badge("b-ok", "✔ Final", fd + " blocks on top: cannot be changed any more") + w;
+    return badge("b-info", "Settling " + (b.depth === null ? "?" : b.depth) + " / " + fd, "in a block; fewer than " + fd + " blocks on top, a rare rollback could still move it") + w;
+  }
+  function renderTrust(s) {
+    var rows = s.gateways.map(function (g) {
+      return "<tr><td><b>" + (g.name ? esc(g.name) : "unknown signer") + "</b></td><td>" + approvedBadge(g.name ? g.approved : null) +
+        (g.approved === false ? "<span class=\"muted small\"> its data is refused</span>" : "") + "</td>" +
+        "<td class=\"num\">" + g.batches + "</td><td class=\"num\">" + g.readings + "</td>" +
+        "<td class=\"num\">" + (g.last_batch_age === null ? "never" : dur(g.last_batch_age) + " ago") + "</td></tr>";
+    });
+    $("gw-trust").innerHTML = rows.length ? rows.join("") : "<tr><td colspan=\"5\" class=\"empty\">No gateways known.</td></tr>";
+    var r = s.registry || {};
+    $("reginfo").textContent = r.known ? "The list on the chain has " + r.size + " entries (read " + dur(r.age) + " ago)." :
+      "The list could not be read from the chain" + (r.error ? " (" + r.error + ")" : "") + ".";
+    var c = s.counts, settling = c.batches - c.final - c.rolled_back;
+    $("t-final").textContent = c.final; $("t-settling").textContent = settling; $("t-back").textContent = c.rolled_back;
+    $("t-bar").style.width = (c.batches ? Math.round(c.final / c.batches * 100) : 0) + "%";
+    var out = [];
+    s.batches.slice(0, 8).forEach(function (b) {
+      var who = b.signer_name ? esc(b.signer_name) : "unknown signer";
+      var open = !!openTx[b.txid];
+      out.push("<tr><td>" + dur(b.seen_age) + " ago</td><td><b>" + who + "</b></td><td class=\"num\">" + b.readings + "</td><td>" + statusCell(b, s.final_depth) +
+        "</td><td class=\"num\"><button class=\"verify\" data-tx=\"" + esc(b.txid) + "\">" + (open ? "Hide" : "Verify") + "</button></td></tr>");
+      if (open) {
+        out.push("<tr class=\"detail\"><td colspan=\"5\"><dl>" +
+          "<dt>Transaction</dt><dd class=\"mono\">" + esc(b.txid) + "</dd>" +
+          "<dt>In block</dt><dd>" + (b.block === null || b.block === undefined ? "-" : b.block) + (b.estimate ? " (estimated)" : "") + ", " +
+            (b.depth === null ? "?" : b.depth) + " blocks on top</dd>" +
+          "<dt>Fingerprint of the data</dt><dd class=\"mono\">" + esc(b.hash) + "</dd>" +
+          "<dt>Signed by</dt><dd>" + who + " <span class=\"mono muted\">" + esc(short(b.signer, 20)) + "</span></dd>" +
+          "<dt>What it proves</dt><dd>These " + b.readings + " readings were written to the blockchain by an approved gateway (receipt no. " +
+            (b.receipts === null || b.receipts === undefined ? "-" : b.receipts) + "). Changing a single value would change the fingerprint.</dd></dl></td></tr>");
+      }
+    });
+    $("batches-trust").innerHTML = out.length ? out.join("") : "<tr><td colspan=\"5\" class=\"empty\">No batches on the chain yet.</td></tr>";
+  }
+
+  // ------------------------------------------------------------------ details tab
+  function renderDetails(s) {
+    var t = s.tip, k = s.kupo, c = s.counts, r = s.registry || {};
+    var rows = [
+      ["Chain tip", t ? "block " + t.block + " (slot " + t.slot + ")" : "unknown" + (s.tip_error ? " - node not reachable" : "")],
+      ["Indexer (Kupo)", k.ok ? "ok, slot " + esc((k.health || {}).checkpoint) : "unreachable: " + esc(k.error)],
+      ["Server time (UTC)", dateclock(s.server_time)],
+      ["Batches / readings", c.batches + " / " + c.readings + " (" + c.final + " batches final)"],
+      ["Registry on the chain", r.known ? r.size + " approved keys" : "unknown" + (r.error ? ": " + esc(r.error) : "")]
+    ];
+    $("sysinfo").innerHTML = rows.map(function (x) { return "<tr><td class=\"muted\" style=\"width:220px\">" + x[0] + "</td><td>" + x[1] + "</td></tr>"; }).join("");
+    var out = [], list = s.batches.slice(0, 8);
     list.forEach(function (b) {
       var depthCell;
-      if (b.status === "rolled back") {
-        depthCell = "<span class=\"bar\"><i class=\"gone\" style=\"width:100%\"></i></span>" + badge("b-bad", "rolled back");
-      } else {
+      if (b.status === "rolled back") depthCell = badge("b-bad", "rolled back");
+      else {
         var pct = b.progress === null ? 0 : Math.round(b.progress * 100);
-        var word = b.status === "final" ? badge("b-ok", "final", "60 blocks on top: cannot be rolled back any more") : badge("b-info", "not final yet", "fewer than 60 blocks on top: could still change in a rollback");
+        var word = b.status === "final" ? badge("b-ok", "final") : badge("b-info", "not final yet");
         depthCell = "<span class=\"bar\"><i class=\"" + (b.status === "final" ? "final" : "") + "\" style=\"width:" + pct + "%\"></i></span>" +
           (b.depth === null ? "?" : b.depth) + " / " + s.final_depth + " " + word +
-          (b.estimate ? badge("b-warn", "estimate", "the server was started after this batch was written, so it did not see the block arrive: the depth is calculated from the slot number (5 s per block), not counted") : "") +
-          (b.reorgs ? badge("b-warn", "moved " + b.reorgs + "x", "the batch was in another block before") : "");
+          (b.estimate ? badge("b-warn", "estimate", "the server started after this batch was written: depth calculated from the slot number") : "") +
+          (b.reorgs ? badge("b-warn", "moved " + b.reorgs + "x") : "");
       }
-      var who = b.signer_name ? "<b>" + esc(b.signer_name) + "</b>" : "<span class=\"mono\" title=\"" + esc(b.signer) + "\">" + esc(short(b.signer, 14)) + "</span>";
+      var who = b.signer_name ? "<b>" + esc(b.signer_name) + "</b>" : "<span class=\"mono\">" + esc(short(b.signer, 14)) + "</span>";
       var warn = b.warnings.map(function (w) { return badge("b-bad", w); }).join("");
-      rows.push("<tr><td>" + who + (b.declared !== b.signer_name ? " <span class=\"muted small\">says " + esc(b.declared) + "</span>" : "") + "</td>" +
-        "<td class=\"num\">" + b.batch_no + "</td><td class=\"num\">" + b.readings + "</td>" +
-        "<td>" + dur(b.seen_age) + " ago</td><td class=\"num\">" + (b.block === null || b.block === undefined ? "-" : b.block) + "</td>" +
-        "<td>" + depthCell + "</td>" +
-        "<td class=\"mono\" title=\"transaction " + esc(b.txid) + " - batch hash " + esc(b.hash) + "\">" + esc(b.txid.slice(0, 10)) + "</td>" +
-        "<td>" + (warn || "<span class=\"muted\">-</span>") + "</td></tr>");
+      out.push("<tr><td>" + who + (b.declared !== b.signer_name ? " <span class=\"muted small\">says " + esc(b.declared) + "</span>" : "") + "</td>" +
+        "<td class=\"num\">" + b.batch_no + "</td><td class=\"num\">" + b.readings + "</td><td>" + dur(b.seen_age) + " ago</td>" +
+        "<td class=\"num\">" + (b.block === null || b.block === undefined ? "-" : b.block) + "</td><td>" + depthCell + "</td>" +
+        "<td class=\"mono\" title=\"" + esc(b.txid) + "\">" + esc(b.txid.slice(0, 10)) + "</td><td>" + (warn || "<span class=\"muted\">-</span>") + "</td></tr>");
     });
-    $("batches").innerHTML = rows.length ? rows.join("") : "<tr><td colspan=\"8\" class=\"empty\">No batches on the chain yet.</td></tr>";
-    var more = s.counts.batches - list.length;
-    $("olderfinal").textContent = more > 0 ? more + " older batches are not listed (they are counted in the top bar)." : "that is all of them.";
-  }
-
-  function renderGateways(s) {
-    var rows = s.gateways.map(function (g) {
+    $("batches").innerHTML = out.length ? out.join("") : "<tr><td colspan=\"8\" class=\"empty\">No batches on the chain yet.</td></tr>";
+    var more = c.batches - list.length;
+    $("olderfinal").textContent = more > 0 ? more + " older batches are not listed." : "";
+    $("gateways").innerHTML = s.gateways.map(function (g) {
       return "<tr><td>" + (g.name ? "<b>" + esc(g.name) + "</b>" : badge("b-warn", "unknown signer")) + "</td>" +
-        "<td class=\"mono\" title=\"" + esc(g.address) + "\">" + esc(short(g.address, 22)) + "</td>" +
-        "<td class=\"num\">" + g.batches + "</td><td class=\"num\">" + g.readings + "</td>" +
+        "<td class=\"mono\">" + esc(g.address) + "</td><td class=\"num\">" + g.batches + "</td><td class=\"num\">" + g.readings + "</td>" +
         "<td class=\"num\">" + (g.last_batch_age === null ? "never" : dur(g.last_batch_age) + " ago") + "</td>" +
         "<td class=\"num\">" + (g.receipts === null ? "-" : g.receipts) + "</td></tr>";
-    });
-    $("gateways").innerHTML = rows.length ? rows.join("") : "<tr><td colspan=\"6\" class=\"empty\">No gateways known.</td></tr>";
+    }).join("");
   }
 
   // interactive line chart of one sensor (inline SVG, drawn at its real pixel size)
@@ -336,17 +446,37 @@
   window.addEventListener("resize", function () { if (last && !hovering) renderChart(last); });
 
   function render(s) {
-    renderTop(s); renderSensors(s); renderBatches(s); renderGateways(s); renderChart(s);
+    renderTop(s);
+    if (tab === "sensors") { renderSensors(s); renderChart(s); }
+    else if (tab === "trust") renderTrust(s);
+    else renderDetails(s);
     var b = $("banner");
     if (failed) { b.className = "banner show"; b.textContent = "The server does not answer. Showing the last data received."; }
     else if (!s.kupo.ok) { b.className = "banner show warn"; b.textContent = "Indexer unreachable: " + s.kupo.error + ". Showing the last data it gave."; }
     else b.className = "banner";
   }
 
-  $("sensors").addEventListener("click", function (e) {
-    var tr = e.target.closest("tr");
-    if (!tr || !tr.getAttribute("data-key")) return;
-    selected = selected === tr.getAttribute("data-key") ? null : tr.getAttribute("data-key");
+  function showTab(t) {
+    tab = t;
+    ["sensors", "trust", "details"].forEach(function (n) { $("tab-" + n).className = "tab" + (n === t ? " on" : ""); });
+    Array.prototype.forEach.call(document.querySelectorAll("nav button"), function (b) { b.className = b.getAttribute("data-tab") === t ? "on" : ""; });
+    if (last) render(last);
+  }
+  document.querySelector("nav").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (b) showTab(b.getAttribute("data-tab"));
+  });
+  $("groups").addEventListener("click", function (e) {
+    var c = e.target.closest(".card");
+    if (!c) return;
+    selected = c.getAttribute("data-key");
+    try { history.replaceState(null, "", "#" + encodeURIComponent(selected)); } catch (x) {}
+    if (last) { hovering = false; render(last); }
+  });
+  $("batches-trust").addEventListener("click", function (e) {
+    var b = e.target.closest("button.verify");
+    if (!b) return;
+    var id = b.getAttribute("data-tx");
+    if (openTx[id]) delete openTx[id]; else openTx[id] = 1;
     if (last) render(last);
   });
 
@@ -363,6 +493,7 @@
     req.onerror = req.ontimeout = function () { failed = true; if (last) render(last); else { var b = $("banner"); b.className = "banner show"; b.textContent = "The server does not answer."; } next(); };
     req.send();
   }
+  showTab(tab);
   tick();
 })();
 </script>

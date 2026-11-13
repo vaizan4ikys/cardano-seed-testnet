@@ -6,3 +6,4 @@ __pycache__/
 .DS_Store
 experiments/contract/phase3/results/txs/
 experiments/contract/phase3/results/p3-run.out
+experiments/multisite/state/

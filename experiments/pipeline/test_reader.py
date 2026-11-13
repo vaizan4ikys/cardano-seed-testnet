@@ -499,5 +499,41 @@ class ServerTest(unittest.TestCase):
             httpd.server_close()
 
 
+class RegistryTest(unittest.TestCase):
+    DATUM = ("9f581c94a660c19b61152497a956bf6a695d39563707e3539b1200c6424d51581cdd98d1c77bbf358f10f651365cef1622ff3cebbe77459e3dc04b1678ff")
+    A1 = "addr_test1vz22vcxpnds32fyh49tt76nft5u4vdc8udfekysqcepy65gq952qx"      # key hash 94a660...
+
+    def test_parse_and_address(self):
+        self.assertEqual(reader.parse_key_list(self.DATUM)[0], "94a660c19b61152497a956bf6a695d39563707e3539b1200c6424d51")
+        self.assertEqual(len(reader.parse_key_list(self.DATUM)), 2)
+        self.assertEqual(reader.parse_key_list("80"), [])
+        self.assertEqual(reader.address_key_hash(self.A1), "94a660c19b61152497a956bf6a695d39563707e3539b1200c6424d51")
+        self.assertIsNone(reader.address_key_hash("nonsense"))
+        with self.assertRaises(ValueError):
+            reader.parse_key_list("a0")
+
+    def test_registry_poll(self):
+        class FakeKupo:
+            def __init__(self): self.fail = False
+            def _get(self, path, **params):
+                if self.fail: raise OSError("down")
+                if path.startswith("/matches/"):
+                    return [{"value": {"coins": 1, "assets": {"pol.tok": 1}}, "datum_hash": "h1"},
+                            {"value": {"coins": 5, "assets": {}}}], {}
+                return {"datum": RegistryTest.DATUM}, {}
+        k = FakeKupo()
+        reg = reader.Registry(k)
+        reg.ident = ("addr_x", "pol.tok")
+        self.assertIsNone(reg.approved(self.A1))                      # not read yet
+        self.assertTrue(reg.poll())
+        self.assertEqual(reg.info()["size"], 2)
+        self.assertTrue(reg.approved(self.A1))
+        self.assertFalse(reg.approved("addr_test1vzkxdsa2u076g966au58wd4u7upxvfg7um4cuj6quxhtecqr8hx9k"))
+        k.fail = True
+        self.assertFalse(reg.poll())
+        self.assertEqual(reg.info()["size"], 2)                       # the old list stays
+        self.assertIn("down", reg.info()["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

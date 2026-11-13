@@ -93,6 +93,7 @@ def main():
     ap.add_argument("--silent-sensor", default=None, help="id of a sensor that goes silent, e.g. AGRI_002")
     ap.add_argument("--silent-after", type=float, default=10.0, help="seconds after start")
     ap.add_argument("--seq-start", type=int, default=1, help="first sequence number of every sensor")
+    ap.add_argument("--first-id", type=int, default=1, help="number of the first sensor id (AGRI_%%03d); gateways at different sites use different ranges")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=9100)
@@ -100,7 +101,7 @@ def main():
     a = ap.parse_args()
 
     rng = random.Random(a.seed)
-    sensors = [SimSensor("AGRI_%03d" % (i + 1), KIND_LIST[i % len(KIND_LIST)], rng,
+    sensors = [SimSensor("AGRI_%03d" % (a.first_id + i), KIND_LIST[i % len(KIND_LIST)], rng,
                          a.outlier_pct, a.seq_start) for i in range(a.sensors)]
     sink = Sink(a.host, a.port, a.stdout)
     start = time.time()

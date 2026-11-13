@@ -169,12 +169,124 @@ class DockerTip:
         return {"block": int(d["block"]), "slot": int(d["slot"]), "hash": d["hash"]}
 
 
+
+# ---------------------------------------------------------------- the registry (who may send)
+
+_B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def address_key_hash(addr):
+    """bech32 Cardano address -> payment key hash (28 bytes, hex), or None. Checksum is not verified (the address comes from our own file)."""
+    try:
+        _, data = addr.rsplit("1", 1)
+        vals = [_B32.index(c) for c in data[:-6]]
+        acc, bits, out = 0, 0, []
+        for v in vals:
+            acc = (acc << 5) | v
+            bits += 5
+            while bits >= 8:
+                bits -= 8
+                out.append((acc >> bits) & 0xFF)
+        return bytes(out[1:29]).hex() if len(out) >= 29 else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def parse_key_list(cbor_hex):
+    """The registry datum (CBOR: a list of 28-byte strings, definite or indefinite) -> [hex, ...]. Raises ValueError on anything else."""
+    b = bytes.fromhex(cbor_hex)
+    pos = 0
+
+    def head():
+        nonlocal pos
+        ib = b[pos]; pos += 1
+        major, info = ib >> 5, ib & 31
+        if info < 24:
+            return major, info
+        if info in (24, 25, 26, 27):
+            n = 1 << (info - 24)
+            v = int.from_bytes(b[pos:pos + n], "big"); pos += n
+            return major, v
+        if info == 31:
+            return major, None
+        raise ValueError("bad CBOR")
+
+    if b and b[0] >> 5 == 6:                  # a constructor tag around the list: skip it
+        head()
+    major, n = head()
+    if major != 4:
+        raise ValueError("registry datum is not a list")
+    keys = []
+    while True:
+        if n is None and b[pos] == 0xFF:
+            break
+        if n is not None and len(keys) >= n:
+            break
+        major, ln = head()
+        if major != 2 or ln is None:
+            raise ValueError("registry list item is not a byte string")
+        keys.append(b[pos:pos + ln].hex()); pos += ln
+    return keys
+
+
+class Registry:
+    """Reads the gateway list from the chain through Kupo: the one coin at the administrator address that holds the registry token."""
+
+    def __init__(self, kupo, directory="/tmp/p0n", container=None, clock=time.time, log=default_log):
+        self.kupo, self.directory, self.container, self.clock, self.log = kupo, directory, container, clock, log
+        self.ident = None                    # (address, "policy.token")
+        self.keys, self.last_ok, self.error = None, None, "not asked yet"
+
+    def _identity(self):
+        if self.ident:
+            return self.ident
+        if not self.container:
+            self.container = DockerTip()._find()
+        r = subprocess.run(["docker", "exec", self.container, "sh", "-c",
+                            "cd %s && for f in admin.addr policy.id token.hex; do cat $f; echo; done" % self.directory], capture_output=True, text=True, timeout=20)
+        parts = r.stdout.split()
+        if r.returncode != 0 or len(parts) != 3:
+            raise RuntimeError("registry files not found in %s" % self.directory)
+        self.ident = (parts[0], parts[1] + "." + parts[2])
+        return self.ident
+
+    def poll(self):
+        try:
+            addr, asset = self._identity()
+            data, _ = self.kupo._get("/matches/" + addr + "?unspent")
+            hits = [m for m in data if asset in (m.get("value", {}).get("assets") or {})]
+            if len(hits) != 1:
+                raise RuntimeError("%d registry coins found (expected 1)" % len(hits))
+            h = hits[0].get("datum_hash")
+            if not h:
+                raise RuntimeError("registry coin has no datum")
+            d, _ = self.kupo._get("/datums/" + h)
+            self.keys, self.last_ok, self.error = set(parse_key_list(d["datum"])), self.clock(), None
+        except Exception as e:
+            if self.error is None:
+                self.log("registry unreadable: %s" % e)
+            self.error = str(e)
+            return False
+        return True
+
+    def info(self):
+        return {"known": self.keys is not None, "size": len(self.keys) if self.keys is not None else None,
+                "error": self.error, "age": None if self.last_ok is None else round(self.clock() - self.last_ok, 1)}
+
+    def approved(self, address):
+        """True / False, or None if the list is not known (yet) or the address has no key hash."""
+        if self.keys is None:
+            return None
+        h = address_key_hash(address)
+        return None if h is None else h in self.keys
+
 # ---------------------------------------------------------------- the reader
 
 class Reader:
     def __init__(self, kupo, tip_source, gateways=None, final_depth=60, window=300, silent_after=30,
-                 limits=None, receipt_policy=None, clock=time.time, log=default_log, kupo_url=""):
+                 limits=None, receipt_policy=None, clock=time.time, log=default_log, kupo_url="", registry=None):
         self.kupo, self.tip_source = kupo, tip_source
+        self.registry = registry                                # Registry or None
         self.gateways = dict(gateways or {})                   # name -> address
         self.names = {a: n for n, a in self.gateways.items()}  # address -> name
         self.final_depth, self.window, self.silent_after = final_depth, window, silent_after
@@ -397,6 +509,7 @@ class Reader:
             for r in rec["readings"]:
                 s = table.setdefault((r["sensor"], r["kind"]), {"scale": r["scale"], "points": {}})
                 s["scale"] = r["scale"]
+                s["gateway"] = self._signer_name(rec["signer"]) or rec["declared"]   # the newest batch wins
                 s["points"][(r["ts"], r["seq"], r["value"])] = 1
         for s in table.values():
             s["points"] = sorted(s["points"])
@@ -413,7 +526,7 @@ class Reader:
             tip = dict(self.tip) if self.tip else None
             if tip:
                 tip["age"] = round(now - self.tip_time, 1)
-            batches, counts = [], {"batches": 0, "final": 0, "rolled_back": 0, "estimate": 0, "readings": 0}
+            batches, counts = [], {"batches": 0, "final": 0, "rolled_back": 0, "estimate": 0, "readings": 0, "final_readings": 0}
             per_gw = {}
             for rec in reversed(list(self.batches.values())):
                 depth = self._depth(rec)
@@ -429,6 +542,7 @@ class Reader:
                 else:
                     counts["readings"] += len(rec["readings"])
                     counts["final"] += 1 if rec["final"] else 0
+                    counts["final_readings"] += len(rec["readings"]) if rec["final"] else 0
                     counts["estimate"] += 1 if rec["estimate"] else 0
                     g = per_gw.setdefault(rec["signer"], {"batches": 0, "readings": 0, "last_seen": 0, "last_slot": 0,
                                                           "receipts": None})
@@ -466,12 +580,14 @@ class Reader:
                     "limits": {k: list(v) for k, v in self.limits.items()},
                     "counts": dict(counts, skipped_foreign=len(self.skipped), other_transactions=len(self.foreign) - len(self.skipped),
                                    sensors=len(sensors)),
+                    "registry": self.registry.info() if self.registry else {"known": False, "size": None, "error": "not configured", "age": None},
                     "gateways": gws, "batches": batches, "sensors": sensors}
 
     def _gateway_row(self, name, addr, g, now):
         return {"name": name, "address": addr, "batches": g["batches"] if g else 0, "readings": g["readings"] if g else 0,
                 "last_batch_age": round(now - g["last_seen"], 1) if g else None,
-                "last_slot": g["last_slot"] if g else None, "receipts": g["receipts"] if g else None}
+                "last_slot": g["last_slot"] if g else None, "receipts": g["receipts"] if g else None,
+                "approved": self.registry.approved(addr) if self.registry else None}
 
     def _sensor_row(self, sensor, kind, s, now, max_points):
         pts = s["points"]
@@ -484,7 +600,7 @@ class Reader:
         out_count = sum(1 for p in pts if not self._in_range(kind, p[2] / float(scale)))
         arrived = self.arrival.get((sensor, kind), self.started)
         since = now - arrived
-        return {"sensor": sensor, "kind": kind, "unit": UNITS.get(kind, ""), "scale": scale,
+        return {"sensor": sensor, "kind": kind, "gateway": s.get("gateway"), "unit": UNITS.get(kind, ""), "scale": scale,
                 "latest": round(value, digits), "text": "%.*f" % (digits, value), "last_ts": ts, "count": len(pts),
                 "out_of_range": not self._in_range(kind, value), "out_of_range_count": out_count,
                 "seen_age": round(since, 1), "silent": since > self.silent_after,
