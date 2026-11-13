@@ -5,8 +5,8 @@
 #   ./fresh.sh               DESTROYS the running chain (new genesis, new keys, new registry); asks you to type "yes"
 #   ./fresh.sh --yes         same without asking
 #
-# NOT TESTED END TO END (written 12 November 2026; checked only by reading and `bash -n` and --dry-run, because running it
-# would have destroyed the chain that the rehearsals use). Each piece reuses an existing, tested script:
+# TESTED END TO END on 13 November 2026 (run for real with --yes: every step OK, preflight all PASS, demo passed on the new chain).
+# Step 0b sets the VM clock once from the Mac while the chain is stopped (never leave internet NTP on). Each piece reuses an existing, tested script:
 #   1 ./run.sh with PV=9 (new chain)          2 wait for blocks and the Conway era     3 Kupo: wipe + start
 #   4 copy the contract project and the scripts to seedvm and into the container
 #   5 p0-admin.sh (keys of administrator and gateways A/B, one-time funding of the administrator)
@@ -40,6 +40,17 @@ fi
 if [ $DRY = 0 ] && [ $YES = 0 ]; then
   say; say "  This DESTROYS the running chain on seedvm (all containers of net-1, all keys in $P0_DIR, the registry, Kupo's data)."
   printf '  Type yes to continue: '; read -r ans < /dev/tty; [ "$ans" = yes ] || die "not confirmed"
+fi
+
+step "0b. stop the old chain, then set the seedvm clock to the Mac clock (the chain takes its time from the VM clock)"
+# Only now, with no chain running: a clock jump under a running chain would break it. This is a one-time manual set,
+# NOT internet NTP (seedvm stays the chrony time source for the other VMs; they follow it).
+act "ssh seedvm: ./stop.sh" vm "cd ~/cardano-seed-testnet && ./stop.sh > /dev/null 2>&1; true"
+if [ $DRY = 1 ]; then say "  WOULD: sudo date -u -s @<Mac epoch> on seedvm, then check the difference is under 5 s"
+else
+  vm "sudo -n date -u -s @$(date -u +%s) >/dev/null" || die "could not set the clock on seedvm (needs sudo)"
+  D=$(( $(vm "date -u +%s" | tail -1) - $(date -u +%s) )); [ ${D#-} -le 5 ] || die "seedvm clock still differs by $D s"
+  say "  seedvm clock set; difference to the Mac: $D s"
 fi
 
 step "1. new chain with protocol version 9 (run.sh removes the old chain first; takes several minutes)"
