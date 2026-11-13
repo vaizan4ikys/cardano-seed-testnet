@@ -1,0 +1,11 @@
+name = "cybertel/gateway-registry"
+version = "0.0.0"
+compiler = "v1.1.24"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Minting policy: a data transaction passes only if an enrolled gateway signed it"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v4.0.0"
+source = "github"

@@ -12,3 +12,8 @@
 **/results/*-queue.sh
 # the rogue-node and pool logs of the outsider runs are small and are the evidence: keep them
 !**/outsider/results/*/*.log
+# Aiken build outputs (rebuilt by p0-aiken.sh; aiken.lock IS kept) and demo outboxes of the gateway program
+**/gateway-registry/build/
+**/gateway-registry/plutus.json
+**/gateway-registry/plutus-applied.json
+**/pipeline/outbox*/
