@@ -8,7 +8,9 @@
 
 AIKEN_VERSION=1.1.24
 KUPO_VERSION=2.12.0
-# the seed-emulator version this repository was built and tested with (Mar 2024); install-tools.sh and the docs use it
+# the seed-emulator version this repository was built and tested with (release v1.1, Mar 2024);
+# install-tools.sh and the docs use it. SEED_COMMIT is the commit of that release tag.
+SEED_TAG=v1.1
 SEED_COMMIT=e26637e915fb2f83be0b165d3fb731b400db6fe6
 
 # tools_arch: the CPU name as the Aiken download calls it: aarch64 (ARM) or x86_64 (Intel/AMD, "amd64")

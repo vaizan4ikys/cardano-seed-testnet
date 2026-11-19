@@ -176,14 +176,14 @@ If you see "permission denied", the log out / log in did not happen yet (see the
 ### 10. The SEED Emulator
 
 SEED is the Python library that builds the emulated Internet around the nodes. It is cloned here; its Python packages are installed in step 13.
-Use exactly this version (the one the demo was built and tested with, from March 2024):
+Use exactly its release **v1.1** (March 2024, commit `e26637e`): the demo was built and tested with it.
 
 ```
-git clone https://github.com/seed-labs/seed-emulator ~/seed-emulator
-git -C ~/seed-emulator checkout e26637e915fb2f83be0b165d3fb731b400db6fe6
+git clone --branch v1.1 https://github.com/seed-labs/seed-emulator ~/seed-emulator
 ```
 
-*You should see:* `HEAD is now at e26637e9 Merge pull request #189 ...` (git also prints a long "detached HEAD" advice; that is normal).
+*You should see:* `Note: switching to 'e26637e915fb2f83be0b165d3fb731b400db6fe6'` and a long "detached HEAD" advice; that is normal
+(a release is a fixed version, not a branch you work on).
 The clone is about 400 MB and took 10 s on the test VM. If a different folder is used, set `SEED_EMULATOR=<path>`; the default is `~/seed-emulator`.
 There is nothing to put into `~/.bashrc`: the scripts set `PYTHONPATH` themselves.
 

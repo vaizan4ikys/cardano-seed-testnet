@@ -92,13 +92,13 @@ check_seed() {
   py=$(seed_python)
   if [ ! -d "$SEED_EMULATOR/seedemu" ]; then
     fail "seed-emulator is not cloned (no $SEED_EMULATOR/seedemu)"
-    hint "git clone https://github.com/seed-labs/seed-emulator $SEED_EMULATOR && git -C $SEED_EMULATOR checkout $SEED_COMMIT"
+    hint "git clone --branch $SEED_TAG https://github.com/seed-labs/seed-emulator $SEED_EMULATOR"
     hint "(another folder: export SEED_EMULATOR=<folder>). Run this script again afterwards: it then creates the Python environment"
   elif command -v "$py" > /dev/null 2>&1 && PYTHONPATH=$SEED_EMULATOR "$py" -c 'import seedemu' > /dev/null 2>&1; then
     pass "seed-emulator can be imported (from $SEED_EMULATOR, Python: $py)"
     HEAD_NOW=$(git -C "$SEED_EMULATOR" rev-parse HEAD 2> /dev/null)
     if [ -n "$HEAD_NOW" ] && [ "$HEAD_NOW" != "$SEED_COMMIT" ]; then
-      echo "        note: seed-emulator is at commit ${HEAD_NOW:0:7}, the tested one is ${SEED_COMMIT:0:7}: git -C $SEED_EMULATOR checkout $SEED_COMMIT"
+      echo "        note: seed-emulator is at commit ${HEAD_NOW:0:7}, the tested one is ${SEED_COMMIT:0:7} (release $SEED_TAG): git -C $SEED_EMULATOR checkout $SEED_TAG"
     fi
   else
     fail "seed-emulator cannot be imported with $py (from $SEED_EMULATOR)"

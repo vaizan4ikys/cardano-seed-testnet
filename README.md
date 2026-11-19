@@ -21,7 +21,7 @@ The rest of this file is about the chain itself.
 * Docker Engine with the Compose v2 plugin (Ubuntu packages `docker.io` and `docker-compose-v2`), usable without `sudo`
 * an NTP-synced clock (`timedatectl` shows `System clock synchronized: yes`; the chain takes its time from it)
 * `git`, `python3`, `python3-venv`, `python3-dev`, `build-essential`, `curl`, `jq`, `openssl`, `rsync`
-* [seed-emulator](https://github.com/seed-labs/seed-emulator) cloned into `~/seed-emulator` and checked out at commit `e26637e915fb2f83be0b165d3fb731b400db6fe6` (the tested one); its Python packages
+* [seed-emulator](https://github.com/seed-labs/seed-emulator) cloned into `~/seed-emulator` and at its release v1.1 (`git clone --branch v1.1 ...`, commit `e26637e`, the tested one); its Python packages
   go into a virtual environment `~/seed-venv` (`./scripts/install-tools.sh` creates it; `run.sh` finds seed-emulator and that environment by itself)
 * for the demo also Aiken v1.1.24 and Kupo v2.12.0 (`./scripts/install-tools.sh` downloads them into `~/tools`)
   (the full step-by-step guide is [`docs/INSTALL.md`](docs/INSTALL.md))
