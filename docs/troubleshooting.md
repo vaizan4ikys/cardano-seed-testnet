@@ -49,8 +49,13 @@ then `sudo conntrack -D -d 10.150.0.71`. The pools reconnect and the shorter cha
 **Symptom:** the chain makes a block only every 10-15 s instead of about 5 s; the three pools show different tip hashes
 (`./scripts/check.sh`); in the router of AS150 `birdc show protocols` shows a BGP session "Active ... Connection reset by peer";
 the demo fails at step 5 or 6 because batches wait too long.
-**Cause:** docker reuses an image when it already exists. On one VM 14 images (routers and hosts) had been built with the
-files of other nodes (for example router r100 with the BGP config of r102), and every later `run.sh` reused them.
-**Fix (automatic since then):** `run.sh` runs `scripts/check-images.sh` after `docker compose up`: it compares the files in
-every container with the generated ones and rebuilds wrong images without the build cache. By hand:
+**Cause** (found later the same day on a new VM, reproduced with 30 small test images): SEED writes all files within one
+clock tick, so files of different nodes have the same name, size and modification time. The legacy builder that
+`docker compose` uses when the buildx plugin is missing (Ubuntu's `docker.io` package) then puts one node's file into
+another node's image (for example router r100 got the BGP config of r102), even with `--no-cache`; later runs reuse
+those images.
+**Fix (automatic since then):** `run.sh` gives every service folder its own file time before building
+(`scripts/check-images.sh --stamp`; test: 28 of 30 images wrong before, 0 of 30 after), and after `docker compose up` it
+runs `scripts/check-images.sh`, which compares the files in every container with the generated ones and rebuilds wrong
+images (with new file times). By hand:
 `./scripts/check-images.sh --check` (compare only) or `./scripts/check-images.sh` (compare and repair).

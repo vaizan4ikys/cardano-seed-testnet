@@ -128,6 +128,10 @@ if [ "${DISK:-0}" -ge 15 ]; then
 else
   fail "free disk: ${DISK:-?} GB, needed: 15 GB"
   hint "enlarge the virtual disk of the VM, or remove files (docker system prune)"
+  if findmnt -n -o SOURCE / 2> /dev/null | grep -q '^/dev/mapper/ubuntu--vg-ubuntu--lv$'; then
+    # Ubuntu's installer gives the LVM volume of / only part of the disk by default
+    hint "if lsblk shows a bigger disk than /, give / the rest: sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv"
+  fi
 fi
 MEMKB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null)
 if [ "${MEMKB:-0}" -ge 3670016 ]; then   # 3.5 GB in kB

@@ -13,6 +13,7 @@
 #   SKIP_NTP_CHECK=1    local mode: start the chain although the clock is not NTP-synchronized (only if it is right)
 #   EXPOSE=1            local mode: let other machines join through pool 1 (for experiments/multisite; asks for sudo)
 #   MAGIC (42), P0_DIR (/tmp/p0n)
+#   PROGRESS_EVERY=20   seconds between two progress lines while a long step runs (steps 1 and 2)
 #
 #   ./fresh.sh --dry-run     print what would be done, change nothing (safe)
 #   ./fresh.sh               DESTROYS the running chain (new genesis, new keys, new registry); asks you to type "yes"
@@ -53,6 +54,7 @@ MAGIC=${MAGIC:-42}                  # network magic of net 1 (scripts/lib.sh wou
                                     # P0_DIR (work folder inside pool 1's container) comes from scripts/config.sh
 SCRIPTS_IN_CTR=/tmp/p0-scripts      # where the contract scripts are copied inside the pool-1 container
 SSHO="-o ConnectTimeout=10 -o ServerAliveInterval=15"
+PROGRESS_EVERY=${PROGRESS_EVERY:-20}   # a long step prints "... 1 min 20 s: <what it does>" this often
 . "$HERE/host.sh"       # CHAIN_HOST, LOCAL, vm(), push(), SEEDPATH
 export CHAIN_HOST
 if [ $LOCAL = 1 ]; then HLBL="this machine"; else HLBL=$CHAIN_HOST; fi   # how messages call the chain host
@@ -82,6 +84,34 @@ act() {
   fi
 }
 die() { say "STOP: $*"; exit 1; }
+# minsec SECONDS: prints for example "2 min 05 s"
+minsec() { printf '%d min %02d s' $(($1 / 60)) $(($1 % 60)); }
+
+# with_progress HOSTLOG COMMAND...: run COMMAND; while it runs, print every PROGRESS_EVERY seconds the time so far,
+# the current phase (the last ">>> ..." line that run.sh wrote into HOSTLOG on the chain host) and the last log line.
+# Why: the first run on a new VM downloads and builds the docker images for 15-30 minutes without any other output.
+# Prints COMMAND's own output at the end and returns its exit code.
+with_progress() {
+  local hostlog=$1 out pid rc=0 waited=0 phase last
+  shift
+  out=$(mktemp "${TMPDIR:-/tmp}/fresh-step.XXXXXX")
+  "$@" > "$out" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2> /dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    [ $((waited % PROGRESS_EVERY)) = 0 ] || continue
+    phase=$(vm "grep '^>>> ' $hostlog 2> /dev/null | tail -n 1" | cut -c5-100)
+    last=$(vm "tail -n 1 $hostlog 2> /dev/null" | tr -d '\r' | cut -c1-100)
+    [ "$last" = ">>> $phase" ] && last=""
+    say "  ... $(minsec $waited): ${phase:-starting}${last:+   | last line: $last}"
+  done
+  wait "$pid" || rc=$?
+  cat "$out"
+  rm -f "$out"
+  say "  (took $(minsec $waited))"
+  return $rc
+}
 
 # The name of pool 1's container on the chain host (empty when it is not running).
 find_container() { vm "$POOL_CONTAINER_CMD" | tail -1; }
@@ -190,7 +220,8 @@ step "1. new chain with protocol version 9 (run.sh removes the old chain first; 
 # ======================================================================================================
 RUN_SH_CMD="cd ~/$REPO && PYTHONPATH=$SEEDPATH $RUNENV PV=9 ./run.sh > ~/fresh-run.log 2>&1;"
 RUN_SH_CMD="$RUN_SH_CMD rc=\$?; tail -3 ~/fresh-run.log; exit \$rc"
-act "$HLBL: ./run.sh (output in ~/fresh-run.log on $HLBL)" vm "$RUN_SH_CMD" \
+say "  The first run on a new machine downloads and builds the docker images: 15-30 minutes. Later runs: about 3 minutes."
+act "$HLBL: ./run.sh (output in ~/fresh-run.log on $HLBL)" with_progress "~/fresh-run.log" vm "$RUN_SH_CMD" \
   || die "run.sh failed (see ~/fresh-run.log on $HLBL)"
 
 # ======================================================================================================
@@ -200,7 +231,7 @@ if [ $DRY = 1 ]; then
   say "  WOULD poll every 10 s: pool_container 1, then 'cardano-cli conway query tip'" \
       "until era = Conway and block >= 3"
 else
-  reached=0; tries=0
+  reached=0; tries=0; block=""
   while [ $tries -lt 90 ]; do
     CTR=$(find_container)
     if [ -n "$CTR" ]; then
@@ -210,7 +241,14 @@ else
         'import sys,json; d=json.load(sys.stdin); print(d["block"] if d.get("era")=="Conway" else 0)' 2>/dev/null)
       [ "${block:-0}" -ge 3 ] 2>/dev/null && { reached=1; break; }
     fi
-    tries=$((tries+1)); sleep 10
+    tries=$((tries+1))
+    if [ $((tries * 10 % PROGRESS_EVERY)) -lt 10 ]; then
+      if [ -z "$CTR" ]; then now="pool 1's container is not running yet"
+      elif [ -z "$block" ]; then now="container $CTR is up, its node does not answer yet"
+      else now="block $block (needs block 3 in the era Conway)"; fi
+      say "  ... $(minsec $((tries * 10))) of at most 15 min: $now"
+    fi
+    sleep 10
   done
   [ $reached = 1 ] || die "the chain did not reach block 3 in Conway within 15 minutes (see ~/fresh-run.log on $HLBL)"
   say "  container $CTR, block $block"
