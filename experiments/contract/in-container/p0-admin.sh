@@ -5,6 +5,10 @@
 # - makes the test gateway keys A (will be enrolled) and B (never enrolled)
 # - funds the administrator ONCE from utxo1: a big coin (becomes the one-shot seed of the registry token) and a
 #   separate collateral coin. After this utxo1 is not used by the registry at all.
+# Safe to run again after a failure: existing keys are kept, and the funding transaction is waited for with
+# wait_settled (p0-lib.sh: one more block on top, the same signed transaction is sent again if it gets lost). If an
+# earlier run sent the funding but stopped before writing seed.ref, the next run takes that funding over (when its
+# transaction is in a block) instead of funding the administrator a second time.
 # Writes (inside the work dir): admin.* gwA.* gwB.* token.hex seed.ref admin.coll. Secret keys are mode 600 and never printed.
 # Environment: P0_DIR (work dir, default /tmp/p0, must look like /tmp/<name>), FRESH=1 (delete the work dir first).
 set -eu
@@ -27,8 +31,17 @@ for g in A B; do
 done
 printf 'GW_REGISTRY' | od -An -tx1 | tr -d ' \n' > token.hex
 chmod 600 ./*.skey
+. /tmp/p0-scripts/p0-lib.sh                       # waiting helpers (wait_settled, tx_visible); stays in the work dir
 
 if [ -f seed.ref ]; then echo "administrator already funded (seed $(cat seed.ref)); nothing to do"; exit 0; fi
+if [ -f fundadmin.signed ]; then                  # an earlier run sent the funding: is it in a block now?
+  OLD_ID=$(cli transaction txid --tx-file fundadmin.signed | grep -o '[0-9a-f]\{64\}')
+  if tx_visible "$OLD_ID"; then
+    echo "$OLD_ID#0" > seed.ref; echo "$OLD_ID#1" > admin.coll
+    echo "administrator was funded by an earlier run (tx $OLD_ID): seed coin $OLD_ID#0, collateral coin $OLD_ID#1"
+    exit 0
+  fi
+fi
 UKEY=/cardano/utxo-keys/utxo1/utxo                                   # the key itself is read here by cardano-cli only
 UADDR=$(cli address build --payment-verification-key-file $UKEY.vkey --testnet-magic "$MAGIC")
 # the biggest pure-lovelace coin of utxo1: IN = its txid#index, VAL = its lovelace
@@ -49,11 +62,7 @@ body "$F"
 cli transaction sign --tx-body-file fundadmin.raw --signing-key-file $UKEY.skey --out-file fundadmin.signed
 ID=$(cli transaction txid --tx-file fundadmin.signed | grep -o '[0-9a-f]\{64\}')
 cli transaction submit --tx-file fundadmin.signed --testnet-magic "$MAGIC" > /dev/null
-n=0
-until cli query utxo --tx-in "$ID#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; do
-  sleep 0.5; n=$((n+1))
-  [ $n -gt 120 ] && { echo "funding tx not seen"; exit 1; }
-done
+wait_settled "$ID" fundadmin.signed || { echo "funding tx not seen"; exit 1; }
 echo "$ID#0" > seed.ref; echo "$ID#1" > admin.coll
 echo "administrator funded once from utxo1 (tx $ID, fee $F): seed coin $ID#0 ($((SEED_ADA/1000000)) ADA)," \
      "collateral coin $ID#1 ($((COLL_ADA/1000000)) ADA); admin pkh $(cat admin.pkh)"

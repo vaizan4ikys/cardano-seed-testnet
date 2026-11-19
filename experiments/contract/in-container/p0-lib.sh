@@ -1,9 +1,17 @@
 #!/bin/bash
 # Sourced (not run) by the other p0-*.sh and p1-*.sh scripts INSIDE pool 1's container. The caller sets MAGIC first.
 # After sourcing: the current folder is the work folder W (= $P0_DIR, default /tmp/p0), and these exist:
-#   cli, tx_visible, wait_tx, tip_block, now_ms, biggest_pure_coin, min_fee, gw_utxos, mk_data_tx, submit_tx,
-#   short_err, swap_registry, plutus_err, and the variables PW (policy id of gateway_write), RHEX ("RECEIPT" in hex),
+#   cli, tx_visible, wait_tx, wait_settled, tip_block, now_ms, biggest_pure_coin, min_fee, gw_utxos, mk_data_tx,
+#   submit_tx, short_err, live_coin, find_registry, registry_coin, swap_registry, plutus_err, and the variables
+#   PW (policy id of gateway_write; empty before gateway_write.plutus exists), RHEX ("RECEIPT" in hex),
 #   EXU, EXU_STEPS, EXU_MEM (execution units we declare).
+#
+# A transaction can get lost on this lab chain: when two pools forge a block for the same slot, one block is dropped
+# and the transactions only that block carried are NOT put back into the mempool. So the scripts that must not fail
+# (the demo setup and the gateway) give wait_tx the signed file: it sends the same transaction again every 10 s until
+# the tx is in a block. wait_settled also waits for one more block on top. The experiment scripts (p0-chain.sh,
+# p0-revoke.sh, p0-guards.sh, p0-nodelevel.sh, p0-withdraw.sh, p0-write.sh) call wait_tx WITHOUT the signed file:
+# they measure timings and refusals, so for them nothing is ever resent.
 #
 # The data transactions are built WITHOUT `transaction build` (so no node-side script check at build time):
 # the node (ledger) is the one that accepts or refuses them at submit.
@@ -14,7 +22,8 @@ export CARDANO_NODE_SOCKET_PATH=/node.socket
 cli() { cardano-cli conway "$@"; }
 W=${P0_DIR:-/tmp/p0}; cd $W
 RHEX=$(printf 'RECEIPT' | od -An -tx1 | tr -d ' \n')
-PW=$(cli transaction policyid --script-file gateway_write.plutus)
+# gateway_write.plutus does not exist yet while p0-admin.sh runs (it only uses the waiting helpers), so PW may be empty
+if [ -f gateway_write.plutus ]; then PW=$(cli transaction policyid --script-file gateway_write.plutus); else PW=""; fi
 # Execution units we declare for the policy. NOTE the order of cardano-cli 11.2.3: (STEPS,MEMORY), i.e. (cpu,mem).
 # Measured for a real tx: 23653611 steps / 74016 memory; here with ~10 % margin.
 EXU=${EXU:-"(26100000,81000)"}
@@ -23,16 +32,57 @@ EXU_STEPS=$(echo "$EXU" | tr -d '() ' | cut -d, -f1); EXU_MEM=$(echo "$EXU" | tr
 
 # ---- waiting for the chain ----
 tx_visible() { cli query utxo --tx-in "$1#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; }
-# wait_tx TXID: wait up to 60 s until output 0 of the transaction is visible (= it is in a block)
+# wait_tx TXID [SIGNED_FILE]: wait until output 0 of the transaction is visible (= it is in a block).
+# Without SIGNED_FILE: wait up to 60 s and never send anything (the experiment scripts rely on this).
+# With SIGNED_FILE (the signed transaction file): wait up to 90 s, and every 10 s that the tx is still not in a block
+# submit the same signed file again. Why: if the block that carried our tx is dropped, no pool has the tx any more.
+# A resend is always safe: it spends the same inputs, so it can be in the chain only once, and a node that already
+# has the tx (in the mempool or in a block) just refuses it. We ignore the node's answer to a resend.
+# The resend line goes to stderr, so it is never the last line a script prints on stdout.
 wait_tx() {
-  local n=0
-  until tx_visible "$1"; do
-    sleep 0.5; n=$((n+1))
-    [ $n -gt 120 ] && { echo "timeout waiting for $1"; return 1; }
+  local txid=$1 signed=${2:-} n=0 start=$SECONDS next_resend waited
+  if [ -z "$signed" ]; then
+    until tx_visible "$txid"; do
+      sleep 0.5; n=$((n+1))
+      [ $n -gt 120 ] && { echo "timeout waiting for $txid"; return 1; }
+    done
+    return 0
+  fi
+  next_resend=$((start + 10))
+  until tx_visible "$txid"; do
+    sleep 0.5
+    waited=$((SECONDS - start))
+    [ $waited -ge 90 ] && { echo "timeout waiting for $txid"; return 1; }
+    if [ $SECONDS -ge $next_resend ]; then
+      echo "  not in a block after $waited s: sent the same transaction again" >&2
+      cli transaction submit --tx-file "$signed" --testnet-magic "$MAGIC" > /dev/null 2>&1 || true
+      next_resend=$((SECONDS + 10))
+    fi
   done
   return 0
 }
 tip_block() { cli query tip --testnet-magic "$MAGIC" | jq -r .block; }
+# wait_settled TXID SIGNED_FILE: wait until the tx is in a block AND one more block is on top of it, and resend the
+# signed file if the tx vanishes. Why: a block that carried our tx can still be replaced by an equally long block from
+# another pool (a slot battle); the tx is then gone, and a script that already said "done" would be wrong.
+# Steps: wait_tx (with resend) until visible; remember the tip block; wait until the tip is one higher while the tx
+# stays visible; if it vanished meanwhile, send it again and start over (at most 4 rounds).
+wait_settled() {
+  local txid=$1 signed=$2 round seen_tip tip n
+  for round in 1 2 3 4; do
+    wait_tx "$txid" "$signed" || return 1
+    seen_tip=$(tip_block); n=0
+    while tx_visible "$txid"; do
+      tip=$(tip_block)
+      if [ "${tip:-0}" -gt "${seen_tip:-0}" ]; then return 0; fi
+      sleep 1; n=$((n+1))
+      [ $n -gt 60 ] && { echo "timeout: no block on top of the block with $txid"; return 1; }
+    done
+    echo "  the block with the transaction was replaced: sent the same transaction again" >&2
+    cli transaction submit --tx-file "$signed" --testnet-magic "$MAGIC" > /dev/null 2>&1 || true
+  done
+  echo "the transaction $txid keeps vanishing from the chain"; return 1
+}
 now_ms() { date +%s%3N; }
 
 # ---- helpers for wallets and fees ----
@@ -107,13 +157,41 @@ submit_tx() { cli transaction submit --tx-file $1.signed --testnet-magic "$MAGIC
 short_err() { tr '\n' ' ' | sed 's/.*Error while submitting tx: //' | cut -c1-380; }
 
 # ---- the registry coin ----
+# live_coin TXIN: is this coin (txid#index) still unspent? (return code 0 = yes)
+live_coin() { cli query utxo --tx-in "$1" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; }
+
+# find_registry: prints the registry coin found BY ITS TOKEN: the one coin at the admin address that carries the
+# registry token. Prints nothing when there is not exactly one such coin.
+find_registry() {
+  cli query utxo --address "$(cat admin.addr)" --output-json --testnet-magic "$MAGIC" \
+    | jq -r --arg p "$(cat policy.id)" --arg t "$(cat token.hex)" \
+        '[to_entries[] | select(.value.value[$p][$t] == 1) | .key] | if length == 1 then .[0] else empty end'
+}
+
+# registry_coin: prints the current registry coin (txid#index). Normally that is the coin in registry.ref. If that coin
+# is not live (a registry change was lost, or the block with it was replaced), it prints the coin found by its token
+# instead and fixes registry.ref (with a short note on stderr). Return code 1 (and a message) if no coin is found.
+registry_coin() {
+  local ref found
+  ref=$(cat registry.ref 2>/dev/null || true)
+  if [ -n "$ref" ] && live_coin "$ref"; then echo "$ref"; return 0; fi
+  found=$(find_registry)
+  [ -n "$found" ] || { echo "no single registry coin found at the admin address" >&2; return 1; }
+  echo "$found" > registry.ref
+  echo "note: registry.ref pointed to a coin that is gone (${ref:-none}); now using $found (found by its token)" >&2
+  echo "$found"
+}
+
 # swap_registry DATUMFILE LABEL: the administrator spends the CURRENT registry coin (it sits at the admin address, so the
 # admin key witness is enough) and sends the registry token + the new inline datum to a new output. Only the registry
 # coin is spent (fee comes out of its 5 ADA), so no other admin coin is touched. Sets REGNEW REGOLD REGFEE.
+# The current coin is registry_coin (registry.ref, or the coin found by the token when registry.ref is stale).
 # The old coin and its datum are appended to registry.history; registry.ref points to the new coin when it is in a block.
+# It only builds and signs swap.signed: the caller submits it and waits (wait_settled "${REGNEW%#0}" swap.signed).
 swap_registry() {
   local datum=$1 label=$2 admin policy tok val key=admin f
-  admin=$(cat admin.addr); policy=$(cat policy.id); tok=$(cat token.hex); REGOLD=$(cat registry.ref)
+  admin=$(cat admin.addr); policy=$(cat policy.id); tok=$(cat token.hex)
+  REGOLD=$(registry_coin) || return 1
   [ -f registry.history ] \
     || echo "$(date -u +%FT%TZ) $REGOLD (initial registry coin; history file started later)" > registry.history
   val=$(cli query utxo --tx-in "$REGOLD" --output-json --testnet-magic "$MAGIC" | jq -r '.[].value.lovelace')

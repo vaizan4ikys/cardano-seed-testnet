@@ -18,6 +18,27 @@
 #   ./fresh.sh --dry-run     print what would be done, change nothing (safe)
 #   ./fresh.sh               DESTROYS the running chain (new genesis, new keys, new registry); asks you to type "yes"
 #   ./fresh.sh --yes         same without asking
+#   ./fresh.sh --from N      RESUME at step N (2 to 10) after a failure, on the chain that is already running: the chain
+#                            is not stopped and not rebuilt, the keys and the registry are kept, nothing is asked.
+#                            When a step fails, the STOP message tells you the exact command ("resume with: ...").
+#                            Use the same environment settings (CHAIN_HOST, P0_DIR ...) as in the failed run.
+#                            Allowed: 2 to 10 (and only these), because each of them can be repeated safely:
+#                              2   only waits for the blocks
+#                              3   Kupo: wipe + start (it rebuilds its data from the chain)
+#                              4   only copies files
+#                              5   p0-admin.sh keeps existing keys; it takes over an earlier funding of the admin
+#                              6   same seed coin -> same .plutus files
+#                              7   p0-registry.sh does nothing if the registry exists (it also takes over a mint that an
+#                                  earlier run sent but did not finish)
+#                              8   p1-fund.sh does nothing if the gateways are funded (it also takes over an earlier
+#                                  funding)
+#                              9   rewrites gateways.json from the wallet files
+#                              10  only checks
+#                            Not allowed: 1 (it builds the new chain: that is the run without --from) and 0 (checks).
+#                            --dry-run works with --from (it lists only the steps from N on).
+#   Each transaction step (5, 7, 8) waits until its transaction is in a block AND one more block is on top, and sends
+#   the same signed transaction again when it gets lost (on this chain about 1 block in 9 is replaced by another one).
+#   --from and these waits are NOT yet run for real on the VM (only checked with bash -n and --dry-run).
 #
 # Mac -> seedvm mode TESTED END TO END on 13 November 2026 (run for real with --yes: every step OK, preflight all PASS).
 # Local mode was run for real on 19 November 2026 on an Ubuntu 20.04 arm64 VM as a new user (every step OK, preflight
@@ -38,14 +59,29 @@ HERE=$ROOT/experiments/demo
 . "$ROOT/scripts/config.sh"     # REPO, P0_DIR (lab settings)
 
 DRY=0; YES=0
-for a in "$@"; do
-  case "$a" in
+START=1                             # the first step to run (--from N); 1 = everything, a new chain
+while [ $# -gt 0 ]; do
+  case "$1" in
     --dry-run) DRY=1;;
     --yes) YES=1;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0;;
-    *) echo "unknown option $a (try --help)"; exit 1;;
+    --from)
+      [ $# -ge 2 ] || { echo "--from needs a step number (2 to 10, try --help)"; exit 1; }
+      shift; START=$1;;
+    --from=*) START=${1#--from=};;
+    -h|--help) sed -n '2,/^set -u$/p' "$0" | sed '$d'; exit 0;;
+    *) echo "unknown option $1 (try --help)"; exit 1;;
   esac
+  shift
 done
+# Only steps 2 to 10 can be repeated without a new chain (see the header); step 1 builds the chain, so a restart at
+# step 1 is the normal run without --from.
+case "$START" in
+  1) ;;
+  [2-9]|10) ;;
+  *) echo "--from $START: only the steps 2 to 10 can be resumed (try --help)."
+     echo "Step 1 builds the chain: for that run without --from."
+     exit 1;;
+esac
 
 # ======================================================================================================
 # Settings
@@ -72,7 +108,8 @@ CTR="<pool-1 container>"            # replaced by the real name in step 2
 # ======================================================================================================
 # Helpers
 # ======================================================================================================
-step() { printf '\n######## %s\n' "$*"; }
+CUR_STEP=0                          # the number of the step that is running ("0", "0b", "1" ... "10"), for die
+step() { CUR_STEP=${1%%.*}; printf '\n######## %s\n' "$*"; }
 say() { printf '%s\n' "$*"; }
 # act "text" command...: a dry run prints the command, a real run executes it
 act() {
@@ -83,7 +120,18 @@ act() {
     say "  $text"; "$@"
   fi
 }
-die() { say "STOP: $*"; exit 1; }
+# die TEXT: print the reason, say how to go on (a step from 2 on can be resumed without a new chain), and stop
+die() {
+  say "STOP: $*"
+  case "$CUR_STEP" in
+    [2-9]|10)
+      say "      Fix the problem, then resume at this step (the chain stays as it is; same environment settings):"
+      say "      resume with: $0 --from $CUR_STEP --yes";;
+    1)
+      say "      Step 1 builds the chain: fix the problem and run the whole script again: $0 --yes";;
+  esac
+  exit 1
+}
 # minsec SECONDS: prints for example "2 min 05 s"
 minsec() { printf '%d min %02d s' $(($1 / 60)) $(($1 % 60)); }
 
@@ -175,7 +223,12 @@ else
     || die "aiken or kupo binary missing on $HLBL
         hint: run ~/$REPO/install.sh on $HLBL (or set AIKEN / KUPO_BIN)"
 fi
-if [ $DRY = 0 ] && [ $YES = 0 ]; then
+if [ $DRY = 0 ] && [ $START -ge 3 ]; then
+  # a resume needs the running chain: steps 3 and later work with pool 1's container
+  [ -n "$(find_container)" ] || die "pool 1's container is not running on $HLBL, so there is no chain to resume on:
+        run the whole script (without --from) to build a new chain"
+fi
+if [ $DRY = 0 ] && [ $YES = 0 ] && [ $START = 1 ]; then
   say
   say "  This DESTROYS the running chain on $HLBL (all containers of net-1, all keys in $P0_DIR," \
       "the registry, Kupo's data)."
@@ -183,168 +236,184 @@ if [ $DRY = 0 ] && [ $YES = 0 ]; then
 fi
 
 # ======================================================================================================
-if [ $LOCAL = 1 ]; then
-  step "0b. stop the old chain, check that the clock is NTP-synchronized (the chain takes its time from the VM clock)"
+if [ $START -gt 1 ]; then
+  # a resume (--from N) must NOT stop the chain, set the clock or rebuild anything
+  say
+  say "  resuming at step $START: the running chain is not stopped, the steps before $START are skipped"
 else
-  step "0b. stop the old chain, then set the $CHAIN_HOST clock to the Mac clock (the chain takes its time from the VM clock)"
-fi
-# ======================================================================================================
-# The clock is set only now, with no chain running: a clock jump under a running chain would break it.
-# In Mac mode this is a one-time manual set, NOT internet NTP (seedvm stays the chrony time source for the other VMs;
-# they follow it).
-act "$HLBL: ./stop.sh" vm "cd ~/$REPO && ./stop.sh > /dev/null 2>&1; true"
-if [ $LOCAL = 1 ]; then
-  if [ $DRY = 1 ]; then
-    say "  WOULD: timedatectl show -p NTPSynchronized --value (a warning, not a stop, when it is not yes)"
+  if [ $LOCAL = 1 ]; then
+    step "0b. stop the old chain, check that the clock is NTP-synchronized (the chain takes its time from the VM clock)"
   else
-    ntp_state=$(vm "timedatectl show -p NTPSynchronized --value" | tail -1)
-    if [ "$ntp_state" = yes ]; then
-      say "  clock is NTP-synchronized"
-    else
-      say "  WARNING: the clock is not NTP-synchronized (timedatectl says '${ntp_state:-?}')." \
-          "run.sh will stop with 'clock is not NTP-synced yet'."
-      say "           Fix: sudo timedatectl set-ntp true, wait a minute," \
-          "and check the clock of the Windows PC (VM time follows it)."
-      say "           Only if you know the clock is right: SKIP_NTP_CHECK=1 $0"
-    fi
+    step "0b. stop the old chain, then set the $CHAIN_HOST clock to the Mac clock (the chain takes its time from it)"
   fi
-elif [ $DRY = 1 ]; then
-  say "  WOULD: sudo date -u -s @<Mac epoch> on $CHAIN_HOST, then check the difference is under 5 s"
-else
-  vm "sudo -n date -u -s @$(date -u +%s) >/dev/null" || die "could not set the clock on $CHAIN_HOST (needs sudo)"
-  clock_diff=$(( $(vm "date -u +%s" | tail -1) - $(date -u +%s) ))
-  [ ${clock_diff#-} -le 5 ] || die "$CHAIN_HOST clock still differs by $clock_diff s"
-  say "  $CHAIN_HOST clock set; difference to the Mac: $clock_diff s"
+  # The clock is set only now, with no chain running: a clock jump under a running chain would break it.
+  # In Mac mode this is a one-time manual set, NOT internet NTP (seedvm stays the chrony time source for the other
+  # VMs; they follow it).
+  act "$HLBL: ./stop.sh" vm "cd ~/$REPO && ./stop.sh > /dev/null 2>&1; true"
+  if [ $LOCAL = 1 ]; then
+    if [ $DRY = 1 ]; then
+      say "  WOULD: timedatectl show -p NTPSynchronized --value (a warning, not a stop, when it is not yes)"
+    else
+      ntp_state=$(vm "timedatectl show -p NTPSynchronized --value" | tail -1)
+      if [ "$ntp_state" = yes ]; then
+        say "  clock is NTP-synchronized"
+      else
+        say "  WARNING: the clock is not NTP-synchronized (timedatectl says '${ntp_state:-?}')." \
+            "run.sh will stop with 'clock is not NTP-synced yet'."
+        say "           Fix: sudo timedatectl set-ntp true, wait a minute," \
+            "and check the clock of the Windows PC (VM time follows it)."
+        say "           Only if you know the clock is right: SKIP_NTP_CHECK=1 $0"
+      fi
+    fi
+  elif [ $DRY = 1 ]; then
+    say "  WOULD: sudo date -u -s @<Mac epoch> on $CHAIN_HOST, then check the difference is under 5 s"
+  else
+    vm "sudo -n date -u -s @$(date -u +%s) >/dev/null" || die "could not set the clock on $CHAIN_HOST (needs sudo)"
+    clock_diff=$(( $(vm "date -u +%s" | tail -1) - $(date -u +%s) ))
+    [ ${clock_diff#-} -le 5 ] || die "$CHAIN_HOST clock still differs by $clock_diff s"
+    say "  $CHAIN_HOST clock set; difference to the Mac: $clock_diff s"
+  fi
 fi
 
 # ======================================================================================================
-step "1. new chain with protocol version 9 (run.sh removes the old chain first; takes several minutes)"
-# ======================================================================================================
-RUN_SH_CMD="cd ~/$REPO && PYTHONPATH=$SEEDPATH $RUNENV PV=9 ./run.sh > ~/fresh-run.log 2>&1;"
-RUN_SH_CMD="$RUN_SH_CMD rc=\$?; tail -3 ~/fresh-run.log; exit \$rc"
-say "  The first run on a new machine downloads and builds the docker images: 15-30 minutes." \
-    "Later runs: about 3 minutes."
-act "$HLBL: ./run.sh (output in ~/fresh-run.log on $HLBL)" with_progress "~/fresh-run.log" vm "$RUN_SH_CMD" \
-  || die "run.sh failed (see ~/fresh-run.log on $HLBL)"
+if [ $START -le 1 ]; then
+  step "1. new chain with protocol version 9 (run.sh removes the old chain first; takes several minutes)"
+  RUN_SH_CMD="cd ~/$REPO && PYTHONPATH=$SEEDPATH $RUNENV PV=9 ./run.sh > ~/fresh-run.log 2>&1;"
+  RUN_SH_CMD="$RUN_SH_CMD rc=\$?; tail -3 ~/fresh-run.log; exit \$rc"
+  say "  The first run on a new machine downloads and builds the docker images: 15-30 minutes." \
+      "Later runs: about 3 minutes."
+  act "$HLBL: ./run.sh (output in ~/fresh-run.log on $HLBL)" with_progress "~/fresh-run.log" vm "$RUN_SH_CMD" \
+    || die "run.sh failed (see ~/fresh-run.log on $HLBL)"
+fi
 
 # ======================================================================================================
-step "2. wait for the container and for blocks (era Conway, tip advancing; up to 15 minutes)"
+if [ $START -le 2 ]; then
+  step "2. wait for the container and for blocks (era Conway, tip advancing; up to 15 minutes)"
+  if [ $DRY = 1 ]; then
+    say "  WOULD poll every 10 s: pool_container 1, then 'cardano-cli conway query tip'" \
+        "until era = Conway and block >= 3"
+  else
+    reached=0; tries=0; block=""
+    while [ $tries -lt 90 ]; do
+      CTR=$(find_container)
+      if [ -n "$CTR" ]; then
+        tip_json=$(vm "docker exec $CTR cardano-cli conway query tip --socket-path /node.socket" \
+                      "--testnet-magic $MAGIC 2>/dev/null")
+        block=$(printf '%s' "$tip_json" | python3 -c \
+          'import sys,json; d=json.load(sys.stdin); print(d["block"] if d.get("era")=="Conway" else 0)' 2>/dev/null)
+        [ "${block:-0}" -ge 3 ] 2>/dev/null && { reached=1; break; }
+      fi
+      tries=$((tries+1))
+      # every PROGRESS_EVERY seconds (one try = 10 s) say what we are waiting for
+      waited=$((tries * 10))
+      if [ $((waited % PROGRESS_EVERY)) -lt 10 ]; then
+        if [ -z "$CTR" ]; then now="pool 1's container is not running yet"
+        elif [ -z "$block" ]; then now="container $CTR is up, its node does not answer yet"
+        else now="block $block (needs block 3 in the era Conway)"; fi
+        say "  ... $(minsec $waited) of at most 15 min: $now"
+      fi
+      sleep 10
+    done
+    [ $reached = 1 ] || die "the chain did not reach block 3 in Conway within 15 minutes (see ~/fresh-run.log on $HLBL)"
+    say "  container $CTR, block $block"
+  fi
+fi
+
 # ======================================================================================================
-if [ $DRY = 1 ]; then
-  say "  WOULD poll every 10 s: pool_container 1, then 'cardano-cli conway query tip'" \
-      "until era = Conway and block >= 3"
-else
-  reached=0; tries=0; block=""
-  while [ $tries -lt 90 ]; do
+if [ $START -le 3 ]; then
+  step "3. Kupo: wipe the old database and start (rebuilds from the new chain)"
+  act "kupo.sh wipe" vm "cd ~/$REPO/experiments/pipeline && ./kupo.sh wipe" || die "kupo wipe failed"
+  act "kupo.sh start" vm "cd ~/$REPO/experiments/pipeline && ./kupo.sh start" || die "kupo start failed"
+fi
+
+# ======================================================================================================
+if [ $START -le 4 ]; then
+  step "4. copy the contract project and the scripts to the VM and into the container"
+  if [ $LOCAL = 1 ]; then
+    say "  local mode: the contract project and the scripts are already in place, nothing to copy to the VM"
+  else
+    act "rsync contract/, pipeline/, demo/ and scripts/tools.sh to $CHAIN_HOST" copy_to_host
+  fi
+  COPY_CMD="C=\$($POOL_CONTAINER_CMD); cd ~/$REPO/experiments && docker exec \$C mkdir -p $SCRIPTS_IN_CTR"
+  COPY_CMD="$COPY_CMD && docker cp contract/in-container/. \$C:$SCRIPTS_IN_CTR/"
+  COPY_CMD="$COPY_CMD && docker cp demo/in-container/. \$C:$SCRIPTS_IN_CTR/"
+  act "docker cp the in-container scripts (p0-*, p1-*, p1-list, p1-fund) to $SCRIPTS_IN_CTR" vm "$COPY_CMD" \
+    || die "copy into the container failed"
+fi
+
+# ======================================================================================================
+if [ $START -le 5 ]; then
+  step "5. administrator key, keys of gateways A and B, one-time funding of the administrator (p0-admin.sh)"
+  act "p0-admin.sh" run p0-admin.sh || die "p0-admin.sh failed"
+fi
+
+# ======================================================================================================
+if [ $START -le 6 ]; then
+  step "6. Aiken: check, build, apply the parameters (p0-aiken.sh on the VM), put the .plutus files into the container"
+  if [ $DRY = 1 ]; then
+    say "  WOULD: SEED=\$(cat $P0_DIR/seed.ref in the container), TOK=\$(cat $P0_DIR/token.hex)"
+    say "         $HLBL: bash $REPO/experiments/contract/p0-aiken.sh" \
+        "<seed txid> <seed index> <token hex> /tmp/p0build-p0n"
+    say "         docker cp registry_mint.plutus gateway_write.plutus gateway_withdraw.plutus" \
+        "registry.policy.aiken into $P0_DIR"
+  else
     CTR=$(find_container)
-    if [ -n "$CTR" ]; then
-      tip_json=$(vm "docker exec $CTR cardano-cli conway query tip --socket-path /node.socket" \
-                    "--testnet-magic $MAGIC 2>/dev/null")
-      block=$(printf '%s' "$tip_json" | python3 -c \
-        'import sys,json; d=json.load(sys.stdin); print(d["block"] if d.get("era")=="Conway" else 0)' 2>/dev/null)
-      [ "${block:-0}" -ge 3 ] 2>/dev/null && { reached=1; break; }
-    fi
-    tries=$((tries+1))
-    # every PROGRESS_EVERY seconds (one try = 10 s) say what we are waiting for
-    waited=$((tries * 10))
-    if [ $((waited % PROGRESS_EVERY)) -lt 10 ]; then
-      if [ -z "$CTR" ]; then now="pool 1's container is not running yet"
-      elif [ -z "$block" ]; then now="container $CTR is up, its node does not answer yet"
-      else now="block $block (needs block 3 in the era Conway)"; fi
-      say "  ... $(minsec $waited) of at most 15 min: $now"
-    fi
-    sleep 10
-  done
-  [ $reached = 1 ] || die "the chain did not reach block 3 in Conway within 15 minutes (see ~/fresh-run.log on $HLBL)"
-  say "  container $CTR, block $block"
+    SEED=$(vm "docker exec $CTR cat $P0_DIR/seed.ref" | tail -1)      # the one-shot seed coin: <txid>#<index>
+    TOK=$(vm "docker exec $CTR cat $P0_DIR/token.hex" | tail -1)      # the registry token name in hex
+    [ -n "$SEED" ] && [ -n "$TOK" ] || die "no seed.ref / token.hex: step 5 failed"
+    BUILD=/tmp/p0build-$(basename "$P0_DIR")
+    vm "bash $REPO/experiments/contract/p0-aiken.sh ${SEED%#*} ${SEED#*#} $TOK $BUILD" \
+      || die "aiken step failed (the first run downloads the Aiken standard library from github.com:" \
+             "does $HLBL have internet?)"
+    vm "for f in registry_mint gateway_write gateway_withdraw;" \
+       "do docker cp $BUILD/\$f.plutus $CTR:$P0_DIR/\$f.plutus; done;" \
+       "docker cp $BUILD/registry.policy.aiken $CTR:$P0_DIR/registry.policy.aiken" \
+      || die "copy of the .plutus files failed"
+  fi
 fi
 
 # ======================================================================================================
-step "3. Kupo: wipe the old database and start (rebuilds from the new chain)"
-# ======================================================================================================
-act "kupo.sh wipe" vm "cd ~/$REPO/experiments/pipeline && ./kupo.sh wipe" || die "kupo wipe failed"
-act "kupo.sh start" vm "cd ~/$REPO/experiments/pipeline && ./kupo.sh start" || die "kupo start failed"
-
-# ======================================================================================================
-step "4. copy the contract project and the scripts to the VM and into the container"
-# ======================================================================================================
-if [ $LOCAL = 1 ]; then
-  say "  local mode: the contract project and the scripts are already in place, nothing to copy to the VM"
-else
-  act "rsync contract/, pipeline/, demo/ and scripts/tools.sh to $CHAIN_HOST" copy_to_host
-fi
-COPY_CMD="C=\$($POOL_CONTAINER_CMD); cd ~/$REPO/experiments && docker exec \$C mkdir -p $SCRIPTS_IN_CTR"
-COPY_CMD="$COPY_CMD && docker cp contract/in-container/. \$C:$SCRIPTS_IN_CTR/"
-COPY_CMD="$COPY_CMD && docker cp demo/in-container/. \$C:$SCRIPTS_IN_CTR/"
-act "docker cp the in-container scripts (p0-*, p1-*, p1-list, p1-fund) to $SCRIPTS_IN_CTR" vm "$COPY_CMD" \
-  || die "copy into the container failed"
-
-# ======================================================================================================
-step "5. administrator key, keys of gateways A and B, one-time funding of the administrator (p0-admin.sh)"
-# ======================================================================================================
-act "p0-admin.sh" run p0-admin.sh || die "p0-admin.sh failed"
-
-# ======================================================================================================
-step "6. Aiken: check, build, apply the parameters (p0-aiken.sh on the VM), put the .plutus files into the container"
-# ======================================================================================================
-if [ $DRY = 1 ]; then
-  say "  WOULD: SEED=\$(cat $P0_DIR/seed.ref in the container), TOK=\$(cat $P0_DIR/token.hex)"
-  say "         $HLBL: bash $REPO/experiments/contract/p0-aiken.sh" \
-      "<seed txid> <seed index> <token hex> /tmp/p0build-p0n"
-  say "         docker cp registry_mint.plutus gateway_write.plutus gateway_withdraw.plutus" \
-      "registry.policy.aiken into $P0_DIR"
-else
-  CTR=$(find_container)
-  SEED=$(vm "docker exec $CTR cat $P0_DIR/seed.ref" | tail -1)      # the one-shot seed coin: <txid>#<index>
-  TOK=$(vm "docker exec $CTR cat $P0_DIR/token.hex" | tail -1)      # the registry token name in hex
-  [ -n "$SEED" ] && [ -n "$TOK" ] || die "no seed.ref / token.hex: step 5 failed"
-  BUILD=/tmp/p0build-$(basename "$P0_DIR")
-  vm "bash $REPO/experiments/contract/p0-aiken.sh ${SEED%#*} ${SEED#*#} $TOK $BUILD" \
-    || die "aiken step failed (the first run downloads the Aiken standard library from github.com:" \
-           "does $HLBL have internet?)"
-  vm "for f in registry_mint gateway_write gateway_withdraw;" \
-     "do docker cp $BUILD/\$f.plutus $CTR:$P0_DIR/\$f.plutus; done;" \
-     "docker cp $BUILD/registry.policy.aiken $CTR:$P0_DIR/registry.policy.aiken" \
-    || die "copy of the .plutus files failed"
+if [ $START -le 7 ]; then
+  step "7. mint the registry token (one-shot policy); the list starts as [A] only (p0-registry.sh)"
+  act "p0-registry.sh" run p0-registry.sh || die "p0-registry.sh failed"
 fi
 
 # ======================================================================================================
-step "7. mint the registry token (one-shot policy); the list starts as [A] only (p0-registry.sh)"
-# ======================================================================================================
-act "p0-registry.sh" run p0-registry.sh || die "p0-registry.sh failed"
+if [ $START -le 8 ]; then
+  step "8. fund the wallets of A and B (p1-fund.sh)"
+  act "p1-fund.sh" run p1-fund.sh || die "p1-fund.sh failed"
+fi
 
 # ======================================================================================================
-step "8. fund the wallets of A and B (p1-fund.sh)"
-# ======================================================================================================
-act "p1-fund.sh" run p1-fund.sh || die "p1-fund.sh failed"
-
-# ======================================================================================================
-step "9. gateways.json with the NEW wallet addresses (GW01 = A, GW02 = B)"
-# ======================================================================================================
-if [ $DRY = 1 ]; then
-  say "  WOULD: read gwA.addr and gwB.addr from the container," \
-      "write $ROOT/experiments/pipeline/gateways.json$([ $LOCAL = 0 ] && echo ", copy it to $CHAIN_HOST")"
-else
-  CTR=$(find_container)
-  ADDR_A=$(vm "docker exec $CTR cat $P0_DIR/gwA.addr" | tail -1)
-  ADDR_B=$(vm "docker exec $CTR cat $P0_DIR/gwB.addr" | tail -1)
-  case "$ADDR_A$ADDR_B" in
-    addr_test1*addr_test1*) ;;
-    *) die "could not read the wallet addresses: '$ADDR_A' '$ADDR_B'";;
-  esac
-  python3 - "$ROOT/experiments/pipeline/gateways.json" "$ADDR_A" "$ADDR_B" <<'EOP'
+if [ $START -le 9 ]; then
+  step "9. gateways.json with the NEW wallet addresses (GW01 = A, GW02 = B)"
+  if [ $DRY = 1 ]; then
+    say "  WOULD: read gwA.addr and gwB.addr from the container," \
+        "write $ROOT/experiments/pipeline/gateways.json$([ $LOCAL = 0 ] && echo ", copy it to $CHAIN_HOST")"
+  else
+    CTR=$(find_container)
+    ADDR_A=$(vm "docker exec $CTR cat $P0_DIR/gwA.addr" | tail -1)
+    ADDR_B=$(vm "docker exec $CTR cat $P0_DIR/gwB.addr" | tail -1)
+    case "$ADDR_A$ADDR_B" in
+      addr_test1*addr_test1*) ;;
+      *) die "could not read the wallet addresses: '$ADDR_A' '$ADDR_B'";;
+    esac
+    python3 - "$ROOT/experiments/pipeline/gateways.json" "$ADDR_A" "$ADDR_B" <<'EOP'
 import json, sys
 json.dump({"GW01": sys.argv[2], "GW02": sys.argv[3]}, open(sys.argv[1], "w"), indent=2)
 open(sys.argv[1], "a").write("\n")
 EOP
-  say "  wrote gateways.json: GW01 $ADDR_A, GW02 $ADDR_B"
-  push "$ROOT/experiments/pipeline/gateways.json" $REPO/experiments/pipeline/gateways.json
+    say "  wrote gateways.json: GW01 $ADDR_A, GW02 $ADDR_B"
+    push "$ROOT/experiments/pipeline/gateways.json" $REPO/experiments/pipeline/gateways.json
+  fi
 fi
 
 # ======================================================================================================
-step "10. preflight of the demo (demo.sh --step 0)"
-# ======================================================================================================
-act "demo.sh --step 0 --yes" "$HERE/demo.sh" --step 0 --yes || die "preflight failed: see the FAIL lines"
+if [ $START -le 10 ]; then
+  step "10. preflight of the demo (demo.sh --step 0)"
+  act "demo.sh --step 0 --yes" "$HERE/demo.sh" --step 0 --yes || die "preflight failed: see the FAIL lines"
+fi
+
 say
 if [ $DRY = 1 ]; then
   say "dry run finished: nothing was changed."
