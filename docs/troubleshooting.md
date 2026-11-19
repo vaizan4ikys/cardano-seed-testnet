@@ -31,8 +31,9 @@ forged blocks (59 of 1,008 in one 85-minute log; see `./scripts/fork-stats.sh` a
 It is not a bug in the scripts or the contract.
 **Fix:** run the failed step again; the new chain, the keys and the contract build are kept, so no rebuild is needed:
 `./experiments/demo/fresh.sh --from 7 --yes` (step 7 mints the registry token; use the number of the step that failed).
-In the demo scripts the same transaction is sent again every 10 s while they wait, and later steps wait until the transaction is
-final (60 blocks), so a single dropped block does not show.
+Since 20 November 2026 the scripts send the same transaction again every 10 s while they wait, the registry and funding steps
+also wait for one more block on top, and the gateway keeps every batch until it is final (60 blocks), so a single dropped block
+should no longer stop anything.
 To see whether blocks were dropped around the time of the failure: `./scripts/fork-stats.sh --since "<date and time>" --list`.
 
 **A new transaction fails with "All inputs are spent".**
