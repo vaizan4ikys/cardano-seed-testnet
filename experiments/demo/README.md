@@ -1,7 +1,7 @@
 # The demo: sensor data on a private Cardano chain (presenter's guide)
 
 This is the guide for the person who runs and presents the demo. To install everything first, see
-[`docs/INSTALL.md`](../../docs/INSTALL.md) (Ubuntu VM on a Windows PC, from nothing to a running demo).
+[`docs/INSTALL.md`](../../docs/INSTALL.md) (Ubuntu VM on a Windows PC or a Mac, from nothing to a running demo).
 
 ## What the demo shows
 
@@ -34,7 +34,7 @@ The demo proves four things:
 ### Main case: on the Ubuntu VM (local mode)
 
 On Linux the scripts run in **local mode**: the chain, Kupo, the gateways, the sensors and the page server are all on the machine you type on.
-All commands are typed in the VM terminal (or over ssh from Windows), in `~/cardano-seed-testnet`:
+All commands are typed in the VM terminal (or over ssh from your PC or Mac), in `~/cardano-seed-testnet`:
 
 ```
 ./experiments/demo/fresh.sh --yes      # only when there is no chain yet, or the chain is dead: new chain + contract + registry
@@ -45,14 +45,15 @@ All commands are typed in the VM terminal (or over ssh from Windows), in `~/card
 ./stop.sh                              # stop the chain (removes the containers)
 ```
 
-The page is at <http://127.0.0.1:8088> **inside the VM**. From Windows open an ssh tunnel in a second PowerShell window and keep it open
-(`<user>` is your VM user name; 2222 is the VirtualBox port forwarding to the VM's ssh port):
+The page is at <http://127.0.0.1:8088> **inside the VM**. Open an ssh tunnel in a second terminal window and keep it open
+(`<user>` is your VM user name):
 
 ```
-ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1
+ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1      # Windows, VirtualBox (2222 = its port forwarding to the VM's ssh)
+ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>           # Mac, VMware Fusion (<vm-address>: hostname -I in the VM)
 ```
 
-Then open <http://127.0.0.1:8088> in the Windows browser.
+Then open <http://127.0.0.1:8088> in the browser of your PC or Mac.
 In local mode `demo.sh` opens no tunnel; step 1 prints `>>> open http://127.0.0.1:8088 in the browser <<<` and the ssh command of the tunnel.
 `--open` does nothing in local mode on Linux (it only works on macOS; the script says so). The page was checked through a tunnel (`http://127.0.0.1:8089` -> VM port 8088): it answered 200 and `/api/state` showed the registry as known.
 
@@ -165,7 +166,7 @@ Stay calm: nothing here can damage the chain. The quick answers:
 
 | What you see | What to do |
 |---|---|
-| The page shows a banner "The server does not answer" | Wait 10 s. If it stays: is the tunnel window (Windows) still open? Reopen it. Check in the VM: `curl -s http://127.0.0.1:8088/health` |
+| The page shows a banner "The server does not answer" | Wait 10 s. If it stays: is the tunnel window still open? Reopen it. Check in the VM: `curl -s http://127.0.0.1:8088/health` |
 | Page shows "Indexer unreachable" (yellow banner) | Kupo stopped: `cd ~/cardano-seed-testnet/experiments/pipeline && ./kupo.sh start`; the page recovers by itself |
 | "Blockchain not reachable" in red, block number does not move | The chain stands still. Say so, run `./experiments/demo/demo.sh --step 0` in another window to see why. If it is dead (VM was paused): `./experiments/demo/demo.sh --step 6`, then `./experiments/demo/fresh.sh --yes` takes several minutes: show the **Details** tab or the architecture while you wait |
 | Sensors do not show up in step 2 | Batches come every 10 s, give it 30 s. Check `tail -20 /tmp/demo-logs/gwA.log` |

@@ -14,9 +14,10 @@ Full guide: [`experiments/demo/README.md`](../experiments/demo/README.md). Insta
 | 5 | clean stop (also after Ctrl-C) | `./experiments/demo/demo.sh --step 6` |
 | 6 | the end of the day | `./stop.sh` (removes the chain containers) |
 
-Windows: keep a second PowerShell open with `ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1`, then open <http://127.0.0.1:8088>.
+Keep a second terminal open with the tunnel, then open <http://127.0.0.1:8088>:
+Windows (PowerShell) `ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1`; Mac (Terminal) `ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>`.
 Quick health check any time: `./experiments/demo/demo.sh --step 0` (all PASS = ready).
-Do not suspend the VM or let Windows sleep.
+Do not suspend the VM or let the computer sleep (Mac: `caffeinate -d` in a Terminal window).
 
 ## The demo, step by step (plan 10-15 min with talking)
 

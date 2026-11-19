@@ -9,7 +9,7 @@ Using Blockchain Technology*: Cardano replaces Ethereum as the ledger.
 
 ## Start here
 
-* **Install and run the demo on your own Ubuntu virtual machine** (for example on a Windows PC): [`docs/INSTALL.md`](docs/INSTALL.md).
+* **Install and run the demo on your own Ubuntu virtual machine** (on a Windows PC or a Mac): [`docs/INSTALL.md`](docs/INSTALL.md).
   Step by step, from "nothing installed" to the demo in your browser.
 * **Run and present the demo** (sensors, gateway, smart contract, chain, web page): [`experiments/demo/README.md`](experiments/demo/README.md).
 

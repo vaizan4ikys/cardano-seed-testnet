@@ -1,7 +1,9 @@
 # Install and run the demo on your own Ubuntu virtual machine
 
-This guide takes you from "a Windows PC with nothing installed" to "the demo runs and I see it in my Windows browser".
+This guide takes you from "a Windows PC or a Mac with nothing installed" to "the demo runs and I see it in my browser".
 Follow the steps in order. Every step has the exact command and a line that says what you should see.
+Only creating the VM (steps 1 to 5) and opening the page (steps 17 and 18) differ between **Windows** and **Mac**; those
+steps have one part for each. Everything inside the VM (steps 6 to 16) is the same.
 
 ## What you get
 
@@ -18,7 +20,7 @@ Later runs (a new chain with `fresh.sh --yes`, then the demo) need about 5 minut
 ## Words used in this guide
 
 * **VM** (virtual machine): a computer simulated by a program, with its own Ubuntu inside your Windows.
-* **Host**: your Windows PC. **Guest**: the Ubuntu inside the VM.
+* **Host**: your Windows PC or Mac. **Guest**: the Ubuntu inside the VM.
 * **Docker**: runs programs in isolated "containers". The whole blockchain (about 35 containers) runs in Docker.
 * **Stake pool**: a node that makes blocks. This chain has 3.
 * **Kupo**: a small indexer that lets the web page read the chain quickly.
@@ -28,14 +30,14 @@ Later runs (a new chain with `fresh.sh --yes`, then the demo) need about 5 minut
 
 | | Minimum | Recommended |
 |---|---|---|
-| PC | Windows 10 or 11, 64 bit | same |
-| Virtualization | switched on in BIOS/UEFI (called VT-x, AMD-V or "SVM mode") | same |
+| Computer | Windows 10 or 11, 64 bit; or a Mac (Apple M1 to M4, or Intel) | same |
+| Virtualization | Windows: switched on in BIOS/UEFI (called VT-x, AMD-V or "SVM mode"); Mac: nothing to do | same |
 | VM CPUs | 2 | 4 |
 | VM RAM | 4 GB | 6 GB |
 | VM disk | 30 GB | 40 GB |
 | Internet | needed (downloads of about 5 GB in total, see below) | |
 
-Check that virtualization is on: Task Manager (Ctrl+Shift+Esc) -> tab Performance -> CPU -> "Virtualization: Enabled".
+Windows: check that virtualization is on: Task Manager (Ctrl+Shift+Esc) -> tab Performance -> CPU -> "Virtualization: Enabled".
 If it says "Disabled", switch it on in the BIOS/UEFI (the key at power-on differs per PC: Del, F2, F10 ...).
 
 Downloads. What was measured on the test VM: the SEED clone 400 MB on disk, its Python packages 70 MB, Aiken 14 MB, Kupo 54 MB (273 MB unpacked),
@@ -45,44 +47,57 @@ from ghcr.io that our image is built from. So "about 5 GB in total" is an estima
 
 ## Part A. Create the VM
 
-### 1. Install VirtualBox on Windows
+### 1. Install the program that runs the VM
 
-Download VirtualBox (free) from <https://www.virtualbox.org/wiki/Downloads> ("Windows hosts") and install it with the defaults.
-
-*You should see:* VirtualBox Manager opens.
+**Windows: VirtualBox.** Download it (free) from <https://www.virtualbox.org/wiki/Downloads> ("Windows hosts") and install it
+with the defaults. *You should see:* VirtualBox Manager opens.
 
 If VirtualBox later says that virtualization is not available although it is on in the BIOS, another Windows feature
 (Hyper-V, "Virtual Machine Platform", "Windows Hypervisor Platform") may be using it. VirtualBox 7 normally works next
 to them, only slower; if the VM does not start, switch these features off in "Turn Windows features on or off" and restart.
+(*VMware Workstation instead:* also free for personal use; then follow the Mac parts of steps 3 and 5, they are the same there.)
 
-*VMware Workstation instead:* it is also free for personal use. Create the VM in the same way (Linux, Ubuntu 64-bit, same sizes).
-VMware has no port forwarding rule to set: use "NAT", find the VM's address with `ip -4 addr` inside the VM, and in the ssh
-commands below replace `-p 2222 ... 127.0.0.1` by the VM address (for example `ssh <user>@192.168.xxx.xxx`).
+**Mac: VMware Fusion.** Free for personal use; download it from Broadcom's site (<https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion>,
+it asks you to create a free account) and install it. This is the setup our own test VMs use (Apple M-series Mac).
+Which Mac do you have? Apple menu -> About This Mac: "Chip: Apple M..." is **Apple Silicon (arm64)**, "Processor: Intel" is **Intel (amd64)**.
 
 ### 2. Download Ubuntu Server 22.04 LTS
 
-Download the ISO "Ubuntu Server 22.04 LTS" (22.04.x, `...-live-server-amd64.iso`) for **amd64** (the normal PC processor) from <https://releases.ubuntu.com/22.04/>.
-(If your PC has an ARM processor, download the arm64 version instead.)
+Download the ISO "Ubuntu Server 22.04 LTS" (22.04.x) for your processor:
+
+* **Windows PC or Intel Mac (amd64):** `...-live-server-amd64.iso` from <https://releases.ubuntu.com/22.04/>.
+* **Apple Silicon Mac (arm64):** `...-live-server-arm64.iso` from <https://cdimage.ubuntu.com/releases/22.04/release/>.
 
 **Use 22.04, not 24.04.** The SEED Emulator version we use needs old pinned Python packages (web3 5.31.1, requests 2.22.0 ...).
 We tried to install them on both versions (in containers): on Ubuntu 22.04 (Python 3.10) it works; on Ubuntu 24.04 (Python 3.12) the import of `seedemu`
 fails three times in a row (`urllib3` needs `six.moves`, `web3` needs `pkg_resources`, `parsimonious` needs `inspect.getargspec`), and it is not worth patching.
 (Ubuntu 20.04, Python 3.8, also works, with the same commands: our test VMs run it.)
 
-*You should see:* a file `ubuntu-22.04...-live-server-amd64.iso` of about 2 GB.
+*You should see:* a file `ubuntu-22.04...-live-server-amd64.iso` (or `-arm64.iso`) of about 2 GB.
 
-### 3. Create the VM in VirtualBox
+### 3. Create the VM
+
+Sizes for both: memory 6144 MB (minimum 4096), 4 processors (minimum 2), disk 40 GB (minimum 30 GB; a 20 GB disk worked on our
+test VM after step 4's disk note).
+
+**Windows (VirtualBox):**
 
 1. Click **New**. Name: `cardano-demo`. ISO Image: the file from step 2. Tick **Skip Unattended Installation**.
-2. Hardware: Base Memory 6144 MB (minimum 4096), Processors 4 (minimum 2).
-3. Virtual Hard Disk: 40 GB (minimum 30 GB).
-4. Finish. Then select the VM -> **Settings** -> **Network** -> Adapter 1 (must be **NAT**) -> **Advanced** -> **Port Forwarding** -> add a rule:
+2. Hardware: Base Memory and Processors as above. Virtual Hard Disk: as above.
+3. Finish. Then select the VM -> **Settings** -> **Network** -> Adapter 1 (must be **NAT**) -> **Advanced** -> **Port Forwarding** -> add a rule:
 
    | Name | Protocol | Host IP | Host Port | Guest IP | Guest Port |
    |---|---|---|---|---|---|
    | ssh | TCP | 127.0.0.1 | 2222 | (empty) | 22 |
 
 *You should see:* the rule in the list; click OK twice.
+
+**Mac (VMware Fusion):**
+
+1. File -> **New** -> drag the ISO from step 2 onto "Install from disc or image" -> Continue -> Finish; save it as `cardano-demo`.
+2. Before the first start (or later with the VM shut down): Virtual Machine -> **Settings** -> **Processors & Memory** and
+   **Hard Disk**: set the sizes above.
+3. Network: leave the default "Share with my Mac" (NAT). No port forwarding is needed: the Mac reaches the VM at its own address (step 5).
 
 ### 4. Install Ubuntu in the VM
 
@@ -92,34 +107,43 @@ Start the VM and go through the Ubuntu installer. Keep the defaults, except:
 * Storage: use the whole disk (the default). **Then check the summary screen** ("Storage configuration"): with the
   default LVM layout Ubuntu gives the system (`ubuntu-lv`, mounted at `/`) only part of the disk, for example 10 GB of 20 GB,
   and the demo needs about 10 GB free. Select `ubuntu-lv` -> Edit -> set Size to the maximum shown -> Save.
-  (Forgot it? After the install, one command gives `/` the rest of the disk:
-  `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`; `df -h /` then shows the bigger size.)
+  (Forgot it? `install.sh` in step 8 notices it and offers the fix: `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`.)
 * Your name, server name, **user name** and password: choose them and write them down. Below `<user>` means your user name.
 * **Install OpenSSH server**: tick it. (Leave "Import SSH identity" at No.)
 * Do not select extra "featured server snaps" (no docker snap: `install.sh` installs Docker in step 8).
 
 When the installer says "Installation complete", choose **Reboot Now**. If it asks to remove the installation medium, press Enter.
+(If `apt update` later complains about `cdrom`, see the troubleshooting table: harmless.)
 
-*You should see:* a text login prompt `cardano-demo login:`. You can log in there, but it is easier to work from Windows (step 5).
+*You should see:* a text login prompt `cardano-demo login:`. You can log in there, but it is easier to work from your
+own terminal (step 5): copy and paste work there.
 
-A VM without a desktop is fine. Everything is done in the terminal; the web page is shown in your Windows browser.
+A VM without a desktop is fine. Everything is done in the terminal; the web page is shown in the browser of your PC or Mac.
 
-### 5. Log in from Windows with ssh
+### 5. Log in with ssh
 
-Open **PowerShell** (Start menu -> type `PowerShell`) and run (replace `<user>`):
+**Windows:** open **PowerShell** (Start menu -> type `PowerShell`) and run (replace `<user>`):
 
 ```
 ssh -p 2222 <user>@127.0.0.1
 ```
 
-Answer `yes` to the question about the host key, then type your password.
-
-*You should see:* a prompt like `<user>@cardano-demo:~$`. This is the Ubuntu terminal. Everything from here on is typed there
-(you can paste with a right-click in PowerShell).
-
 If `ssh` is "not recognized": Windows Settings -> Apps -> Optional features -> Add a feature -> **OpenSSH Client**.
-If ssh says "REMOTE HOST IDENTIFICATION HAS CHANGED" (you had another VM on port 2222 before), run in PowerShell
-`ssh-keygen -R "[127.0.0.1]:2222"` and try again.
+
+**Mac:** first find the VM's address: log in **in the VM window** and run `hostname -I` (capital I). The first address,
+for example `172.16.124.137`, is `<vm-address>` below. (`hostname -i`, small i, prints `127.0.1.1`: that one only works inside the VM.)
+Then open the **Terminal** app on the Mac and run:
+
+```
+ssh <user>@<vm-address>
+```
+
+Both: answer `yes` to the question about the host key, then type your password.
+
+*You should see:* a prompt like `<user>@cardano-demo:~$`. This is the Ubuntu terminal. Everything from here on is typed there.
+
+If ssh says "REMOTE HOST IDENTIFICATION HAS CHANGED" (a new VM got the address or the port of an older one), remove the old
+entry and try again: Windows `ssh-keygen -R "[127.0.0.1]:2222"`, Mac `ssh-keygen -R <vm-address>`.
 
 ## Part B. Get the code and install everything (in the VM)
 
@@ -191,7 +215,7 @@ Docker may only be used without `sudo` after a new login (Linux reads a user's g
 exit
 ```
 
-In PowerShell log in again (`ssh -p 2222 <user>@127.0.0.1`), then:
+Log in again as in step 5, then:
 
 ```
 cd ~/cardano-seed-testnet
@@ -309,20 +333,19 @@ Fresh chain ready. Run the demo: /home/<user>/cardano-seed-testnet/experiments/d
 If a line says `FAIL`, it prints a `hint:` line below it; see the troubleshooting table.
 Everything the demo starts is stopped again at the end.
 
-## Part E. See it in your Windows browser
+## Part E. See it in your browser (Windows or Mac)
 
-The page runs inside the VM, listening only on the VM's own address (`127.0.0.1:8088`). To see it from Windows you open an
-ssh **tunnel** (a forwarded port). The Windows PC is not directly connected to that port.
+The page runs inside the VM, listening only on the VM's own address (`127.0.0.1:8088`). To see it on your PC or Mac you
+open an ssh **tunnel** (a forwarded port): your computer's port 8088 then leads to the VM's port 8088.
 
 ### 17. Open the tunnel
 
-Open a **second** PowerShell window (keep it open during the whole demo) and run:
+Open a **second** terminal window (keep it open during the whole demo) and run:
 
-```
-ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1
-```
+* **Windows** (second PowerShell window): `ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1`
+* **Mac** (second Terminal window): `ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>`
 
-*You should see:* a normal login, as in step 5. This window now forwards port 8088 of Windows to port 8088 of the VM.
+*You should see:* a normal login, as in step 5. This window now forwards port 8088 of your computer to port 8088 of the VM.
 
 ### 18. Start the demo and open the page
 
@@ -334,12 +357,12 @@ cd ~/cardano-seed-testnet
 ```
 
 It stops before every step with `[press Enter to start this step]`. After step 1 has started the page server, open
-<http://127.0.0.1:8088> in your Windows browser.
+<http://127.0.0.1:8088> in the browser of your PC or Mac. (Before that, the browser says that the connection was refused: normal.)
 
 *You should see:* the page "Sensor data on the blockchain" with the header "Sensors live / Readings stored permanently / Approved gateways"
 and three tabs: Sensors, Trust, Details. In step 2 sensor cards appear and the numbers move.
 What to click and what to say is in [`experiments/demo/README.md`](../experiments/demo/README.md).
-In local mode `demo.sh` opens no tunnel and no browser; step 1 prints `>>> open http://127.0.0.1:8088 in the browser <<<` and the ssh command for a tunnel (checked on the test VM).
+In local mode `demo.sh` opens no tunnel and no browser; step 1 prints `>>> open http://127.0.0.1:8088 in the browser <<<` and the ssh commands for a tunnel.
 
 ## Presenting the demo
 
@@ -382,7 +405,7 @@ suspend or save its state, close the laptop lid, or the PC goes to sleep. So:
 * After the VM was off, suspended or the PC slept for more than about 10 minutes: do not try to repair the chain. Run `./experiments/demo/fresh.sh --yes` again.
   It builds a **new** chain; the old demo data (batches, sensors on the page) is gone. The image is already built, so it is faster than the first time.
 * After a short pause run `./experiments/demo/demo.sh --step 0`; if every line is `PASS`, you can go on.
-* Before a presentation, switch off sleep in Windows (Settings -> System -> Power -> Screen and sleep: "Never") and do not suspend the VM.
+* Before a presentation, switch off sleep (Windows: Settings -> System -> Power -> Screen and sleep: "Never"; Mac: keep it on power and run `caffeinate -d` in a Terminal window during the demo) and do not suspend the VM.
 * After a reboot of the VM the containers are not running. Run `./stop.sh` once, then `./experiments/demo/fresh.sh --yes`.
   (All 37 containers have the Docker restart policy `no`, checked with `docker inspect`: they are not started again by Docker after a reboot. We did not reboot the test VM.)
 
@@ -401,10 +424,10 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | `pip install failed` ... `No matching distribution found for jsonschema-specifications==2024.10.1`, or `seed-emulator ... is at another version` | `~/seed-emulator` was cloned without `--branch v1.1` (the newest SEED needs Python 3.9 or newer) | `./install.sh` switches the clone to v1.1 and creates `~/seed-venv`; by hand: `git -C ~/seed-emulator checkout v1.1`, then `./install.sh` |
 | `clock is not NTP-synced yet, wait and retry` | the VM clock is not synchronised | `sudo timedatectl set-ntp true`, wait 1 minute, `timedatectl` must show `System clock synchronized: yes` |
 | `fresh.sh` or the preflight says the page port 8088 is busy | an old page server or another program uses the port | `./experiments/demo/demo.sh --step 6`; find the owner with `ss -ltnp \| grep 8088`; or use another port: `PORT=8089 ./experiments/demo/demo.sh` (then use 8089 in the tunnel and in the browser) |
-| Windows: `bind [127.0.0.1]:8088: Address already in use` / `Could not request local forwarding` | an old tunnel window or another program on Windows uses port 8088 | close the old ssh window; find the owner in PowerShell: `netstat -ano \| findstr :8088`; or use another local port: `ssh -p 2222 -L 8090:127.0.0.1:8088 <user>@127.0.0.1` and open <http://127.0.0.1:8090> |
+| `bind [127.0.0.1]:8088: Address already in use` / `Could not request local forwarding` (Windows or Mac) | an old tunnel window or another program on your computer uses port 8088 | close the old ssh window; find the owner in PowerShell: `netstat -ano \| findstr :8088`; or use another local port: `ssh -p 2222 -L 8090:127.0.0.1:8088 <user>@127.0.0.1` and open <http://127.0.0.1:8090> |
 | Browser shows "connection refused" at 127.0.0.1:8088 | the tunnel is not open, or the page server is not running yet (before step 1 of the demo) | check the tunnel window (step 17) and that `demo.sh` is past step 1; in the VM: `curl -s http://127.0.0.1:8088/health` |
 | `no space left on device`, or the check says the free disk is too low | VM disk too small | at least 10 GB free in the VM (`df -h /`); free space with `docker system prune` (only when the chain is stopped) or enlarge the VM disk |
-| Containers killed, `Cannot allocate memory`, VM freezes | not enough RAM | give the VM at least 4 GB (6 GB recommended), stop other programs on Windows |
+| Containers killed, `Cannot allocate memory`, VM freezes | not enough RAM | give the VM at least 4 GB (6 GB recommended), stop other programs on your computer |
 | `DeadlineExceeded` while building the image | too many parallel builds | `COMPOSE_PARALLEL_LIMIT=2 ./experiments/demo/fresh.sh --yes` |
 | `fresh.sh` fails at the Aiken step ("aiken step failed") | Aiken missing or wrong CPU type in `~/tools`, or no access to github.com (the Aiken standard library is downloaded on the first build) | run `./install.sh` again; test `curl -sI https://github.com \| head -1`; then run `fresh.sh --yes` again |
 | Preflight: `Kupo not ok` | Kupo is not running, or still catching up with the chain | the hint says: `cd ~/cardano-seed-testnet/experiments/pipeline && ./kupo.sh start` (after a **new** chain: `./kupo.sh wipe` first, then `./kupo.sh start`); `./kupo.sh status` shows `behind: N slots`, wait until N is 30 or less and run `demo.sh --step 0` again |
@@ -442,7 +465,7 @@ Not tested (be careful, report problems with the step number and the output):
   The whole demo ran on Ubuntu 20.04 only. In a container on Ubuntu 24.04 the same packages do **not** work (see step 2).
   The Ubuntu 22.04 packages `docker.io` (29.1.3) and `docker-compose-v2` (2.40.3) exist in `universe` (checked with `apt-cache policy`) but were not run; the test VM had Docker 26.1.3 and Compose 2.27.1.
 * **The first build of the docker image** `seedemu-cardano:local` (pulls `ghcr.io/intersectmbo/cardano-node:11.1.3` and `handsonsecurity/seedemu-multiarch-base`): the test VM already had the image.
-* Steps 1 to 5 (VirtualBox, Ubuntu installer, Windows ssh), 7 (clock in a VirtualBox VM) and step 17 (tunnel from Windows) were written from the documentation of VirtualBox and OpenSSH and not run.
+* The **Windows** parts of steps 1 to 5 (VirtualBox, Windows ssh), step 7 in a VirtualBox VM and the Windows tunnel of step 17 were written from the documentation of VirtualBox and OpenSSH and not run. (The **Mac** parts of steps 1 to 5, VMware Fusion on an Apple Silicon Mac with Ubuntu 20.04 arm64, were done on the second test VM.).
   (The tunnel was tested from a Mac with the same `ssh -L` option.)
 * `git clone` of this repository on the VM: the repository is public and answers without a login (`git ls-remote`), but the test VM got a copy with `rsync`, not a clone.
 * A reboot of the VM, and a run on a machine with only 3 GB RAM or a slow disk.
