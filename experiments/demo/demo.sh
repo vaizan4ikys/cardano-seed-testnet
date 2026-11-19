@@ -28,9 +28,11 @@
 #   ./demo.sh --open          open http://127.0.0.1:8088 in the browser (step 1; macOS only, on Linux the address is printed)
 #
 # Steps: 0 preflight  1 page server (+ tunnel in Mac mode)  2 gateway GW01 (enrolled) + 10 sensors
-#        3 gateway GW02 (NOT enrolled)  4 revoke GW01, then enrol again  5 one sensor goes silent  6 clean stop
+#        3 gateway GW02: refused while NOT enrolled, then enrolled: from then on both gateways write
+#        4 revoke GW01, then enrol again  5 one sensor goes silent  6 clean stop
 # Processes on the chain host log to /tmp/demo-logs/<name>.log, outboxes are in /tmp/demo-run-<time>/ (not in the repo).
 # The registry must end with A enrolled, B not enrolled (also after Ctrl-C: the cleanup repairs it).
+# Exception: --step 3 --keep leaves gateway B running and enrolled; the next --step 6 revokes it.
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/experiments/demo
 . "$ROOT/scripts/config.sh"     # REPO, P0_DIR, KUPO_PORT, PAGE_PORT (lab settings)
@@ -58,6 +60,7 @@ GWA_PORT=9101; GWB_PORT=9102         # the sensors of gateway A / B send to thes
 B=${DEMO_B:-100}; T=${DEMO_T:-10}    # gateway batch: 100 readings or 10 s
 SILENT=${DEMO_SILENT:-40}            # page: a sensor is silent after this many seconds without a new reading
 NA=10; NB=5                          # number of sensors of gateway A / B (1 reading per second each)
+B_FIRST=11                           # B's sensors are AGRI_011 ... AGRI_015 (A's are AGRI_001 ... AGRI_010)
 
 VPIPE=$REPO/experiments/pipeline     # the pipeline folder on the chain host (relative to $HOME there)
 SCRIPTS_IN_CTR=/tmp/p0-scripts       # where the contract scripts are copied inside the pool-1 container
@@ -106,6 +109,10 @@ count_silent() {
 }
 count_live() {
   page_state "sum(1 for x in s['sensors'] if x['sensor'] in ['AGRI_%03d'%i for i in range(1,$1+1)] and not x['silent'])"
+}
+# count_live_from FIRST N: how many of the sensors AGRI_<FIRST> ... AGRI_<FIRST+N-1> are live on the page (B's sensors)
+count_live_from() {
+  page_state "sum(1 for x in s['sensors'] if x['sensor'] in ['AGRI_%03d'%i for i in range($1,$1+$2)] and not x['silent'])"
 }
 is_silent() { page_state "[x['silent'] for x in s['sensors'] if x['sensor']=='$1'][0]"; }
 kupo_ok() { [ "$(page_state "s['kupo']['ok']")" = True ]; }
@@ -190,33 +197,43 @@ start_sensors() {
 }
 
 # ---- the registry (list of enrolled gateways) must end as it started: A enrolled, B not ----
-REVOKED=0; INTERRUPTED=0; CLEANED=0
+REVOKED=0          # 1 while step 4 has A revoked
+B_ENROLLED=0       # 1 after step 3 enrolled B
+INTERRUPTED=0; CLEANED=0
+# restore_registry [--keep-b]: read the list and repair it: enrol A if it is missing, revoke B if it is on it
+# (--keep-b: leave B enrolled, for "--step 3 --keep", where gateway B keeps running)
 restore_registry() {
   [ -n "$CTR" ] || return 0
-  local r; r=$(ctr bash $SCRIPTS_IN_CTR/p1-list.sh $MAGIC | tail -1)
+  local keep_b=0 r
+  [ "${1:-}" = --keep-b ] && keep_b=1
+  r=$(ctr bash $SCRIPTS_IN_CTR/p1-list.sh $MAGIC | tail -1)
   case "$r" in
     *A=not-enrolled*) say "cleanup: enrolling A again"; ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1;;
   esac
-  case "$r" in
-    *B=enrolled*) say "cleanup: revoking B"; ctr bash $SCRIPTS_IN_CTR/p1-revoke.sh $MAGIC B | tail -1;;
-  esac
+  if [ $keep_b = 0 ]; then
+    case "$r" in
+      *B=enrolled*) say "cleanup: revoking B"; ctr bash $SCRIPTS_IN_CTR/p1-revoke.sh $MAGIC B | tail -1;;
+    esac
+    B_ENROLLED=0
+  fi
   REVOKED=0
 }
 
 # Stop everything the demo started and repair the registry (runs once, at the end and on Ctrl-C).
+# The processes stop first: a gateway writes out its last batch while it is still enrolled.
 cleanup() {
   [ $CLEANED = 1 ] && return 0
   CLEANED=1
   say; say "stopping what the demo started ..."
-  [ $REVOKED = 1 ] && restore_registry
   vmx stop-all 2>/dev/null | sed 's/^/  /'
+  if [ $REVOKED = 1 ] || [ $B_ENROLLED = 1 ]; then restore_registry; fi
   stop_tunnel
   return 0
 }
 close_master() { [ $LOCAL = 1 ] && return 0; ssh $SSHO -O exit $CHAIN_HOST > /dev/null 2>&1; return 0; }
 on_exit() {
   if [ $KEEP = 1 ] && [ $INTERRUPTED = 0 ]; then
-    [ $REVOKED = 1 ] && restore_registry
+    [ $REVOKED = 1 ] && restore_registry --keep-b
   else
     cleanup
   fi
@@ -593,22 +610,26 @@ step2() {
 }
 
 # ======================================================================================================
-# STEP 3: gateway B (NOT enrolled) is refused by the contract
+# STEP 3: gateway B is refused while it is NOT enrolled; then the administrator enrols it and both gateways write
 # ======================================================================================================
-# What the audience sees: REFUSED lines, dead/ filling up, GW02 stays at 0 batches on the page.
+# What the audience sees: REFUSED lines and GW02 at 0 batches; after the enrolment GW02 "Approved", its batches and
+# its 5 sensor cards (AGRI_011 ... AGRI_015) appear next to GW01's. Both gateways keep running until step 6.
 step3() {
-  hr "STEP 3: gateway GW02 (NOT enrolled) with 5 sensors"
+  hr "STEP 3: gateway GW02 with $NB sensors: refused while not enrolled, then enrolled"
   explain "Gateway B (GW02) has its own funded wallet and its own key, but it is not on the registry list." \
           "It builds the same kind of transaction. The contract (checked by the node when the transaction is submitted)" \
-          "refuses it: no batch of GW02 is ever written to the chain. The gateway moves the batch to dead/ and goes on." \
-          "Look for: the REFUSED line below, 'dead/' filling up, and on the page GW02 stays at 0 batches."
+          "refuses it: no batch of GW02 is written to the chain. The gateway moves the batch to dead/ and goes on." \
+          "Then the administrator puts GW02 on the list (one transaction). GW02's next batches are accepted:" \
+          "from then on BOTH gateways write. Look for: REFUSED lines and GW02 at 0 batches; after the enrolment GW02" \
+          "'Approved' on Trust, its batches and its sensors AGRI_011 ... AGRI_015 next to GW01's."
   pause; begin
   need_basics; ensure_page
   say "  $(start_gateway B)"
-  say "  $(start_sensors sensorsB $GWB_PORT $NB)"
+  say "  $(start_sensors sensorsB $GWB_PORT $NB --first-id $B_FIRST)"
+
+  # -- part 1: not enrolled, refused --
   say "  waiting for 2 refused batches (about 35 s) ..."
   wait_for 120 '[ "$(batches_refused B)" -ge 2 ]' 'echo "refused=$(batches_refused B) dead=$(dead_count $RUN/outboxB)"'
-
   local refused dead sent page_batches
   refused=$(batches_refused B); dead=$(dead_count $RUN/outboxB); sent=$(batches_sent B)
   if [ "$refused" -ge 2 ]; then
@@ -621,10 +642,40 @@ step3() {
   sleep 6
   page_batches=$(as_number "$(gw_field GW02 batches)")
   [ "$page_batches" -eq 0 ] && ok "page shows 0 batches from GW02" || bad "page shows $page_batches batches from GW02!"
-
   say "  the refusal, one line from the gateway log:"; vmx lines gwB 'REFUSED' 1 | sed 's/^/    /'
   say "  the batch moved to dead/:"; vm "ls $RUN/outboxB/dead | head -2" | sed 's/^/    /'
-  vmx stop gwB | sed 's/^/  /'; vmx stop sensorsB | sed 's/^/  /'
+
+  # -- part 2: the administrator enrols B; from now on both gateways write --
+  say "  the administrator enrols B ..."
+  B_ENROLLED=1
+  local enrol_out; enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC B | tail -1); say "    $enrol_out"
+  case "$enrol_out" in
+    OK:*) ok "registry: B enrolled ($(echo "$enrol_out" | sed 's/.*took/took/'))";;
+    *) bad "enrol of B failed: $enrol_out";;
+  esac
+  local sent_at_enrol; sent_at_enrol=$(batches_sent B)
+  say "  waiting for 2 batches of B to be accepted and to show up on the page (about 30 s) ..."
+  wait_for 150 \
+    '[ "$(batches_sent B)" -ge $((sent_at_enrol + 2)) ] && [ "$(as_number "$(gw_field GW02 batches)")" -ge 2 ]' \
+    'echo "B sent=$(batches_sent B) page: GW02 batches=$(gw_field GW02 batches) GW01 batches=$(gw_field GW01 batches)"'
+  local sent_b page_b approved_b live_b
+  sent_b=$(batches_sent B); page_b=$(as_number "$(gw_field GW02 batches)"); approved_b=$(gw_field GW02 approved)
+  live_b=$(as_number "$(count_live_from $B_FIRST $NB)")
+  if [ "$sent_b" -ge $((sent_at_enrol + 2)) ]; then
+    ok "gateway B sent $((sent_b - sent_at_enrol)) batches after the enrolment"
+  else
+    bad "gateway B sent no batches after the enrolment"; hint "gateway log: /tmp/demo-logs/gwB.log"
+  fi
+  [ "$page_b" -ge 2 ] && ok "page shows $page_b batches of GW02" || bad "page shows only $page_b batches of GW02"
+  [ "$approved_b" = True ] && ok "page: GW02 is approved" || bad "page: GW02 approved = '$approved_b'"
+  if [ "$live_b" -ge $((NB - 1)) ]; then
+    ok "$live_b of $NB sensors of GW02 are live on the page (AGRI_011 ...)"
+  else
+    bad "only $live_b of $NB sensors of GW02 live on the page"
+  fi
+  if remote_alive gwA; then
+    say "  both gateways write: GW01 $(gw_field GW01 batches) batches, GW02 $page_b batches on the page"
+  fi
   finish 3
   [ $FAILS -eq 0 ]
 }
@@ -657,7 +708,7 @@ step4() {
   say "  revoking A ..."; REVOKED=1
   local revoke_out; revoke_out=$(ctr bash $SCRIPTS_IN_CTR/p1-revoke.sh $MAGIC A | tail -1); say "    $revoke_out"
   case "$revoke_out" in
-    OK:*"list size now 0"*) ok "registry: A revoked ($(echo "$revoke_out" | sed 's/.*took/took/'))";;
+    OK:*"list size now"*) ok "registry: A revoked ($(echo "$revoke_out" | sed 's/.*took/took/'))";;
     *) bad "revoke failed: $revoke_out";;
   esac
 
@@ -686,7 +737,7 @@ step4() {
   say "  enrolling A again ..."
   local enrol_out; enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1); say "    $enrol_out"
   case "$enrol_out" in
-    OK:*"list size now 1"*) ok "registry: A enrolled again ($(echo "$enrol_out" | sed 's/.*took/took/'))"; REVOKED=0;;
+    OK:*"list size now"*) ok "registry: A enrolled again ($(echo "$enrol_out" | sed 's/.*took/took/'))"; REVOKED=0;;
     *) bad "enrol failed: $enrol_out";;
   esac
 
@@ -751,10 +802,12 @@ step5() {
 step6() {
   hr "STEP 6: clean stop"
   explain "Sensors, gateways (they write out the last batch first), the page server and the tunnel are stopped." \
-          "The registry stays as it was at the start: A enrolled, B not. Logs and outboxes stay in /tmp/demo-logs and $RUN on $HLBL."
+          "The registry goes back to the start: A enrolled, B not (B is revoked again)." \
+          "Logs and outboxes stay in /tmp/demo-logs and $RUN on $HLBL."
   pause; begin
   need_basics
   CLEANED=0; cleanup
+  restore_registry          # also repairs a list left by an earlier "--step 3 --keep" (B still enrolled)
 
   local leftovers registry on_mac="" and_tunnel=""
   [ $LOCAL = 0 ] && on_mac=' on the Mac'

@@ -133,13 +133,15 @@ Top right: "Blockchain connected - block N" (green) or "not reachable" (red).
    On **Sensors**: cards appear under "Gateway GW01 - Approved", "Sensors live 10 of 10", values move. Click a card: graph.
    On **Trust**: new batches appear; each is "Settling n / 60" and becomes "Final" after about 5 minutes. Click **Verify** on one: transaction, block, fingerprint.
    "Readings stored permanently" grows only when batches turn final.
-3. **Gateway GW02, not approved.** "GW02 has its own wallet and key and builds the same kind of transaction. The contract refuses it. Here is the line from the gateway log. The batch goes to `dead/`. Nothing of GW02 is on the page."
+3. **Gateway GW02: refused, then approved.** "GW02 has its own wallet and key and builds the same kind of transaction. The contract refuses it. Here is the line from the gateway log. The batch goes to `dead/`. Nothing of GW02 is on the page."
    On **Trust**: GW02 is "Not approved - its data is refused", 0 batches. On **Sensors**: no cards for GW02. The header stays "1 of 2".
-4. **Revoke and enrol.** "The administrator removes GW01 from the list. GW01's sensors keep sending, but the batches are refused now; these readings are lost."
-   On **Trust**: within a few seconds GW01 turns **Not approved**, the header shows "0 of 2". After 40 s the sensors turn **Silent**, "Sensors live" drops to 0.
-   "Now we enrol GW01 again": GW01 is **Approved** again, "1 of 2"; the next batches go through and the sensors wake up.
+   "Now the administrator puts GW02 on the list, with one transaction." On **Trust**: GW02 turns **Approved**, the header shows "2 of 2", and its batches appear.
+   On **Sensors**: a second group "Gateway GW02 - Approved" with 5 cards (AGRI_011 ... AGRI_015) next to GW01's ten. "From now on both gateways write."
+4. **Revoke and enrol.** "The administrator removes GW01 from the list. GW01's sensors keep sending, but the batches are refused now; these readings are lost. GW02 is not affected and keeps writing."
+   On **Trust**: within a few seconds GW01 turns **Not approved**, the header shows "1 of 2". After 40 s GW01's sensors turn **Silent**; GW02's stay live.
+   "Now we enrol GW01 again": GW01 is **Approved** again, "2 of 2"; the next batches go through and the sensors wake up.
 5. **One sensor silent.** "AGRI_003 stops sending. The page does not hear from it any more and shows **Silent** after 40 s; the other nine carry on." The header shows "Sensors live 9 of 10".
-6. **Stop.** "Everything the demo started is stopped; the chain and the registry are as before."
+6. **Stop.** "Everything the demo started is stopped; the registry is as before: GW01 approved, GW02 not."
 
 ## Timings
 
@@ -150,7 +152,7 @@ Rehearsal on the live chain, 12 November 2026, Mac mode, 10 sensors, B=100, T=10
 | 0 preflight | 4-7 | waits for one new block (about every 5 s on average) |
 | 1 page | 3-4 | |
 | 2 gateway A | 39-45 | 3 batches, one per 10 s, each a few seconds from submit to block |
-| 3 gateway B | 30-31 | 2 refused batches |
+| 3 gateway B | 30-31 (before the enrolment of B was added) | 2 refused batches; since 19 Nov also the enrolment of B and 2 accepted batches (not timed yet) |
 | 4 revoke / enrol | 57-72 | revoke in a block 5.5 s, silent after about 15 s more, enrol 0.8-1.9 s (1.4-6 s measured by hand), new batches after about 18 s |
 | 5 silent sensor | 63-79 | 20 s until the sensor stops + batch time + 40 s silent limit |
 | 6 stop | 3-22 | gateways write out their last batch |

@@ -26,10 +26,10 @@ Do not suspend the VM or let the computer sleep (Mac: `caffeinate -d` in a Termi
 | 0 Preflight | nothing | "We check that the chain makes blocks, the indexer is caught up, the clock is right, and that gateway A is on the registry and B is not." |
 | 1 Page | open the page; click **Trust** | "The page keeps no data of its own, it reads the chain. GW01 is approved, GW02 is not. This list is stored on the blockchain. Header: 1 of 2." |
 | 2 GW01, 10 sensors | **Sensors**: click a card (graph). **Trust**: click **Verify** on a batch | "10 sensors, one reading per second each. Every 10 s the gateway writes one transaction; the contract checks that the gateway is on the list. A batch is Settling, and Final after 60 blocks, about 5 minutes." |
-| 3 GW02, not approved | **Trust**: GW02 "Not approved", 0 batches. **Sensors**: no GW02 cards | "GW02 builds the same kind of transaction. The contract refuses it. Here is the line from the gateway log. Nothing of GW02 is on the chain." |
-| 4 Revoke and enrol | **Trust**: GW01 turns Not approved, header 0 of 2; after 40 s sensors turn Silent. Then Approved again, 1 of 2 | "The administrator removes GW01 from the list. Its batches are refused now, those readings are lost. Now we enrol it again, and the sensors wake up." |
+| 3 GW02: refused, then approved | **Trust**: GW02 "Not approved", 0 batches; after the enrolment "Approved", header 2 of 2, its batches appear. **Sensors**: a GW02 group with 5 cards (AGRI_011 ...) | "GW02 builds the same kind of transaction. The contract refuses it; nothing of GW02 is on the chain. Now the administrator approves GW02 with one transaction: from now on both gateways write." |
+| 4 Revoke and enrol | **Trust**: GW01 turns Not approved, header 1 of 2; after 40 s GW01's sensors turn Silent, GW02's stay live. Then Approved again, 2 of 2 | "The administrator removes GW01 from the list. Its batches are refused now, those readings are lost; GW02 keeps writing. Now we enrol GW01 again, and its sensors wake up." |
 | 5 One sensor silent | **Sensors**: "Sensors live 9 of 10", one card Silent (after 40 s) | "AGRI_003 stops sending. The page hears nothing for 40 s and shows Silent. The other nine carry on." |
-| 6 Stop | nothing | "Everything the demo started is stopped. The chain and the registry are as before." |
+| 6 Stop | nothing | "Everything the demo started is stopped. The registry is as before: GW01 approved, GW02 not." |
 
 "Readings stored permanently" grows only when batches turn Final (about 5 minutes after the first batch). That is why you rehearse first.
 
