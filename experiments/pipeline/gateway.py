@@ -5,20 +5,37 @@ Runs on a gateway machine (a chain VM in the lab). Sensors (sensor.py) connect t
 reading per line; the gateway checks them (layout.py), drops duplicates, writes batch files and calls the submit step.
 
   python3 gateway.py --B 100 --T 30 --listen-port 9100 --outbox outbox --submit dry
-  python3 gateway.py --submit command --submit-command "./submit.sh {file} {hash}"
+  python3 gateway.py --submit command --submit-command "./submit.sh {file} {hash}" --kupo http://10.150.0.71:1442
   python3 gateway.py --help          all options with their defaults
 
 A batch is written when B readings are collected or the oldest reading has waited T seconds.
 Outbox files:   batch-000017-<sha256>.json          the metadata (never changed)
-                batch-000017-<sha256>.json.status   "pending" or "sent"
+                batch-000017-<sha256>.json.status   "pending", "settling", "final" or "sent" (see below)
+                batch-000017-<sha256>.json.tx       the transaction of a "settling" or "final" batch (JSON)
                 state.json                          sequence numbers seen, next batch number
                 dead/                               batches that failed --max-tries submits (not tried again)
-After a restart every batch that is not "sent" is submitted again (same file, same hash).
+After a restart every batch that is "pending" is submitted again (same file, same hash).
 Exit codes of the submit command: 0 = sent, 2 = REFUSED for good (for example the contract does not accept this
 gateway): the batch goes to dead/ at once, without retries; any other code = failed, try again later.
-"sent" only means that the submit step returned success (the node took the transaction into its
-mempool), not that it is in a block. A crash between the submit and the status write sends the batch
-again (at-least-once), so the submit command should be idempotent by batch hash.
+A crash between the submit and the status write sends the batch again (at-least-once), so the submit command
+should be idempotent by batch hash.
+
+Critical data: with --kupo a batch is kept until its transaction is FINAL. The submit command returns 0 when the
+transaction is in a block once; but that block can be replaced by a competing block of another pool (on the lab
+chain about 1 block in 9), and Cardano does not put the transactions of a replaced block back. The states:
+  pending    written, not sent yet (or a submit failed and will be tried again)
+  settling   submitted. The transaction id (the last 64-hex word of the last line the submit command prints) is in
+             the .tx file. Every --confirm-interval seconds each settling batch is looked up in Kupo, the same way
+             as the web page does it: in a block -> how many blocks on top; at --final-blocks (default 60 = k) ->
+             final. Missing for longer than --missing-grace seconds (Kupo is normally less than a second behind,
+             so the transaction was in a replaced block) -> logged and submitted again: same file, same hash, a
+             new transaction. Oldest first (every batch spends the coin of the one before). A resend that is
+             refused for good goes to dead/ like a first submit.
+  final      the transaction is final: nothing more to do (the files stay as the record)
+  sent       submitted, but not followed: dry mode, no --kupo, or no transaction id in the output of the submit
+             command (the old gateway wrote only this). Such a batch is not checked.
+A restart keeps the settling batches and goes on with them. The node tip comes from reader.DockerTip (docker exec).
+check_batches.py reads an outbox and the chain and tells whether every batch arrived.
 The readings that wait in memory for their batch are lost if the process is killed
 (Ctrl-C and SIGTERM write them out first).
 """
@@ -29,15 +46,18 @@ import datetime
 import glob
 import json
 import os
+import re
 import shlex
 import signal
 import socketserver
 import subprocess
 import threading
 import time
-from typing import Callable, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import confirm
 import layout
+import reader
 
 WINDOW = 2000           # sequence numbers remembered per sensor, for duplicate detection
 SEQ_JUMP_WARN = 1000    # warn when a sequence number is this far below the highest seen (sensor restarted?)
@@ -45,8 +65,14 @@ MAX_WARNED = 1000       # at most this many "first problem of a sensor" log line
 MAX_LINE = 65536        # longest line accepted from a sensor (bytes)
 SUBMIT_TIMEOUT = 120    # seconds a submit command may run
 EXIT_SENT, EXIT_REFUSED = 0, 2     # exit codes of the submit command (anything else = failed, retry later)
+FINAL_BLOCKS = 60       # blocks on top of a transaction until it is final (k of this chain)
+CONFIRM_INTERVAL = 15   # seconds between two looks at the batches that are not final yet
+MISSING_GRACE = 60      # seconds a transaction may be missing in Kupo before the batch is sent again
+TXID_RE = re.compile(r"\b[0-9a-f]{64}\b")
+IN_PROGRESS = ("sent", "settling", "final")     # status words of a batch that was submitted (not "pending")
 
-# What a submit step returns: True (sent), False (failed, try again) or "refused" (never try again).
+# What a submit step returns: True (sent, transaction id not known), a 64-hex transaction id (sent, and this is
+# the transaction), False (failed, try again) or "refused" (never try again).
 SubmitResult = Union[bool, str]
 Submit = Callable[[str, str], SubmitResult]
 
@@ -67,9 +93,18 @@ def write_atomic(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+def find_txid(output: str, batch_hash: str) -> Optional[str]:
+    """The transaction id in the last line of the submit command's output: the last 64-hex word of that line
+    that is not the batch hash (p1-batch.sh prints "... batch HASH is in a block: tx TXID (...)"). None if none."""
+    lines = output.strip().splitlines()
+    words = [w for w in TXID_RE.findall(lines[-1]) if w != batch_hash] if lines else []
+    return words[-1] if words else None
+
+
 def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], None] = default_log,
                 timeout: int = SUBMIT_TIMEOUT) -> Submit:
-    """Returns submit(path, hash) -> True (sent), False (failed, try again) or "refused" (never try again).
+    """Returns submit(path, hash) -> True (sent), the transaction id (sent; the command printed it as the last
+    64-hex word of its last line), False (failed, try again) or "refused" (never try again).
 
     mode "dry" sends nothing; mode "command" runs the template (words {file} and {hash} are replaced; without
     them the file and the hash are appended as the last two arguments)."""
@@ -99,7 +134,8 @@ def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], 
                 return "refused"
             if r.returncode != EXIT_SENT:
                 log("submit command exit %d: %s" % (r.returncode, tail))
-            return r.returncode == EXIT_SENT
+                return False
+            return find_txid(r.stdout + r.stderr, h) or True
         return submit
     raise ValueError("unknown submit mode: %s" % mode)
 
@@ -108,16 +144,22 @@ class Gateway:
     """Collects readings, writes them as batch files into the outbox and submits the batch files.
 
     B = readings per batch, T = seconds the oldest reading may wait. Thread safety: self.lock protects the
-    reading buffer and the counters, self.send_lock makes sure only one thread submits at a time."""
+    reading buffer and the counters, self.send_lock makes sure only one thread submits at a time.
+    view = a confirm.ChainView (or None: submitted batches are then not followed to "final")."""
 
     def __init__(self, outbox: str, B: int, T: float, submit: Submit, gateway_id: str = "GW01",
                  clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = default_log,
-                 tx_reserve: int = layout.TX_RESERVE, max_tries: int = 5):
+                 tx_reserve: int = layout.TX_RESERVE, max_tries: int = 5,
+                 view: Optional[confirm.ChainView] = None, final_blocks: int = FINAL_BLOCKS,
+                 missing_grace: float = MISSING_GRACE):
         if not layout.valid_id(gateway_id):
             raise ValueError("bad gateway id (use A-Z a-z 0-9 _ . -, 1-32 characters, not starting with 0x)")
         self.outbox, self.B, self.T, self.submit = outbox, B, T, submit
         self.gateway_id, self.clock, self.log = gateway_id, clock, log
         self.tx_reserve, self.max_tries = tx_reserve, max_tries
+        self.view, self.final_blocks, self.missing_grace = view, final_blocks, missing_grace
+        self.missing_since = {}           # txid -> time (self.clock) when it was first missing in Kupo
+        self.view_problem = None          # why the last look at the chain failed (logged once)
         os.makedirs(outbox, exist_ok=True)
         self.state_path = os.path.join(outbox, "state.json")
         self.lock = threading.RLock()
@@ -129,7 +171,7 @@ class Gateway:
         self.warned = set()               # sensors already reported once (bad data / restart)
         self.retry_flush_at = 0.0
         self.closed = False
-        self.stats = {"received": 0, "dup": 0, "bad": 0, "late": 0, "batches": 0, "dead": 0}
+        self.stats = {"received": 0, "dup": 0, "bad": 0, "late": 0, "batches": 0, "dead": 0, "final": 0, "resent": 0}
         self.stop_ev = threading.Event()
         self.wake = threading.Event()
         self.threads = []
@@ -251,33 +293,71 @@ class Gateway:
         self.wake.set()
 
     # sending ----------------------------------------------------------
-    def _status(self, path: str) -> Union[str, int]:
-        """Returns "sent" or the number of failed tries so far (0 when none or no status file).
-        The status file holds "pending", "pending <tries>" or "sent"."""
+    def _status(self, path: str) -> Tuple[str, int]:
+        """(word, failed tries so far) from the status file: word is "sent", "settling", "final" or "pending"
+        (also when there is no status file). The file holds one of "pending", "pending <tries>", "sent",
+        "settling", "final"."""
         try:
             with open(path + ".status") as f:
                 words = f.read().split()
         except OSError:
-            return 0
-        if words and words[0] == "sent":
-            return "sent"
-        return int(words[1]) if len(words) > 1 and words[1].isdigit() else 0
+            return "pending", 0
+        if words and words[0] in IN_PROGRESS:
+            return words[0], 0
+        return "pending", int(words[1]) if len(words) > 1 and words[1].isdigit() else 0
 
     def pending_files(self) -> List[str]:
-        """Batch files that are not "sent" yet, oldest first."""
+        """Batch files that are not submitted yet, oldest first."""
         return [p for p in sorted(glob.glob(os.path.join(self.outbox, "batch-*.json")))
-                if self._status(p) != "sent"]
+                if self._status(p)[0] == "pending"]
+
+    def settling_files(self) -> List[str]:
+        """Batch files that are submitted but not final yet, oldest first."""
+        return [p for p in sorted(glob.glob(os.path.join(self.outbox, "batch-*.json")))
+                if self._status(p)[0] == "settling"]
+
+    def _load_tx(self, p: str) -> Optional[Dict[str, Any]]:
+        """The .tx file of a batch (see _new_tx), or None if it is missing or damaged."""
+        try:
+            with open(p + ".tx") as f:
+                rec = json.load(f)
+            return rec if isinstance(rec["txid"], str) else None
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+
+    def _save_tx(self, p: str, rec: Dict[str, Any]) -> None:
+        """Write the .tx file (atomically)."""
+        write_atomic(p + ".tx", json.dumps(rec).encode())
+
+    @staticmethod
+    def _new_tx(txid: str, resends: int = 0) -> Dict[str, Any]:
+        """What is remembered of a submitted transaction: the id, where Kupo showed it (slot, block header hash,
+        block number = tip block when first seen), how often the batch was sent again, failed resends in a row."""
+        return {"txid": txid, "slot": None, "header": None, "block": None, "resends": resends, "failed": 0}
 
     def _dead_letter(self, p: str, tries: int, why: Optional[str] = None) -> None:
-        """Move a batch file and its status to dead/ (never tried again)."""
+        """Move a batch file, its status (and its .tx file) to dead/ (never tried again)."""
         dead = os.path.join(self.outbox, "dead")
         os.makedirs(dead, exist_ok=True)
         write_atomic(p + ".status", b"dead %d" % tries)
         os.replace(p, os.path.join(dead, os.path.basename(p)))
         os.replace(p + ".status", os.path.join(dead, os.path.basename(p) + ".status"))
+        if os.path.exists(p + ".tx"):
+            os.replace(p + ".tx", os.path.join(dead, os.path.basename(p) + ".tx"))
         self.stats["dead"] += 1
         self.log("DEAD LETTER: %s %s, moved to %s (not tried again; the readings are NOT on the chain)"
                  % (os.path.basename(p), why or "failed %d submits" % tries, dead))
+
+    def _mark_sent(self, p: str, txid: Optional[str]) -> None:
+        """A submit worked. With a transaction id and a chain view the batch is "settling" (followed until final),
+        else "sent". The .tx file is written first: a crash in between only means one more (idempotent) submit."""
+        if txid and self.view:
+            self._save_tx(p, self._new_tx(txid))
+            write_atomic(p + ".status", b"settling")
+            self.log("sent: %s (transaction %s...)" % (os.path.basename(p), txid[:12]))
+        else:
+            write_atomic(p + ".status", b"sent")
+            self.log("sent: %s" % os.path.basename(p))
 
     def send_pending(self) -> bool:
         """Submit pending batches, oldest first. A failure stops the run (retry later, keeps the
@@ -296,23 +376,118 @@ class Gateway:
                     self.log("submit error: %s" % e)
                     ok = False
                 if ok == "refused":
-                    self._dead_letter(p, self._status(p) + 1, "was refused")
+                    self._dead_letter(p, self._status(p)[1] + 1, "was refused")
                     continue
                 if not ok:
-                    tries = self._status(p) + 1
+                    tries = self._status(p)[1] + 1
                     self.log("not sent: %s (try %d of %d)" % (os.path.basename(p), tries, self.max_tries))
                     if tries >= self.max_tries:
                         self._dead_letter(p, tries)
                         continue
                     write_atomic(p + ".status", b"pending %d" % tries)
                     return False
-                write_atomic(p + ".status", b"sent")
-                self.log("sent: %s" % os.path.basename(p))
+                self._mark_sent(p, ok if isinstance(ok, str) else None)
             return True
 
+    # following the batches until they are final ----------------------------
+    def check_settling(self) -> None:
+        """One round: look at every settling batch (oldest first) in Kupo. In a block: count its depth, final at
+        final_blocks. Missing for longer than missing_grace: send it again. Does nothing without a chain view.
+        When Kupo or the node cannot be asked, nothing is concluded (a Kupo problem is not a replaced block)."""
+        files = self.settling_files() if self.view else []
+        if not files:
+            return
+        why = self.view.refresh()
+        if why:
+            if why != self.view_problem:
+                self.log("cannot check the settling batches now: %s (they are kept; trying again)" % why)
+            self.view_problem = why
+            return
+        if self.view_problem:
+            self.log("the chain can be checked again")
+            self.view_problem = None
+        for p in files:
+            if not self._check_one(p):
+                break                                   # keeps the order: the oldest batch comes first
+
+    def _check_one(self, p: str) -> bool:
+        """Look at one settling batch. Returns False when the round must stop (the resend failed)."""
+        name = os.path.basename(p)
+        rec = self._load_tx(p)
+        if rec is None:                                 # cannot happen normally (.tx is written before the status)
+            self.log("ERROR %s is settling but has no readable .tx file: not followed any more" % name)
+            write_atomic(p + ".status", b"sent")
+            return True
+        try:
+            found = self.view.locate(rec["txid"], rec["slot"])
+        except Exception as e:
+            self.log("cannot ask Kupo about %s: %s" % (name, e))
+            return False
+        if found is None:
+            return self._resend_if_missing(p, rec)
+        self.missing_since.pop(rec["txid"], None)
+        slot, header = found
+        changed = (slot, header) != (rec["slot"], rec["header"])
+        if rec["block"] is None or slot != rec["slot"]:
+            if rec["slot"] is not None:
+                self.log("batch %s: its transaction is now in another block (slot %d, was %d): counting again"
+                         % (name, slot, rec["slot"]))
+            rec["block"] = self.view.new_block(slot)
+            changed = True
+        rec["slot"], rec["header"] = slot, header
+        depth = self.view.depth(rec["block"])
+        if depth is not None and depth >= self.final_blocks:
+            self._save_tx(p, rec)
+            write_atomic(p + ".status", b"final")
+            self.stats["final"] += 1
+            self.log("final: %s (transaction %s..., %d blocks deep)" % (name, rec["txid"][:12], depth))
+        elif changed:
+            self._save_tx(p, rec)
+        return True
+
+    def _resend_if_missing(self, p: str, rec: Dict[str, Any]) -> bool:
+        """The transaction is not in Kupo. Wait for missing_grace seconds, then submit the batch again.
+        Returns False when the resend failed (the caller stops the round)."""
+        name, txid = os.path.basename(p), rec["txid"]
+        since = self.missing_since.setdefault(txid, self.clock())
+        if self.clock() - since < self.missing_grace:
+            return True                                 # Kupo may be a moment behind: wait
+        self.log("batch %s: its transaction is no longer in the chain (block replaced): sending it again" % name)
+        with open(p, "rb") as f:
+            h = layout.batch_hash(f.read())
+        try:
+            with self.send_lock:
+                ok = self.submit(p, h)
+        except Exception as e:
+            self.log("submit error: %s" % e)
+            ok = False
+        if ok == "refused":
+            self._dead_letter(p, rec["failed"] + 1, "was refused when sent again")
+            return True
+        if not ok:
+            rec["failed"] += 1
+            self.log("not sent again: %s (try %d of %d)" % (name, rec["failed"], self.max_tries))
+            if rec["failed"] >= self.max_tries:
+                self._dead_letter(p, rec["failed"], "failed %d submits when sent again" % rec["failed"])
+                return True
+            self._save_tx(p, rec)
+            return False
+        del self.missing_since[txid]
+        if not isinstance(ok, str):                     # sent, but no transaction id to follow
+            write_atomic(p + ".status", b"sent")
+            self.log("sent again: %s (no transaction id in the output: not followed any more)" % name)
+        elif ok == txid:
+            self.log("batch %s: the node still has its transaction (mempool); waiting" % name)
+        else:
+            self._save_tx(p, self._new_tx(ok, rec["resends"] + 1))
+            self.stats["resent"] += 1
+            self.log("sent again: %s (new transaction %s..., resend %d)" % (name, ok[:12], rec["resends"] + 1))
+        return True
+
     # threads ----------------------------------------------------------
-    def start(self, retry: float = 10.0) -> None:
-        """Start the two background threads: flusher (T timeout) and sender (submits, retries every `retry` s)."""
+    def start(self, retry: float = 10.0, check: float = CONFIRM_INTERVAL) -> None:
+        """Start the background threads: flusher (T timeout), sender (submits, retries every `retry` s) and
+        checker (looks at the settling batches every `check` s; only with a chain view)."""
         def flusher():
             while not self.stop_ev.wait(0.1):
                 self.tick()
@@ -323,9 +498,17 @@ class Gateway:
                 self.wake.clear()
                 if not self.stop_ev.is_set():
                     self.send_pending()
+        def checker():
+            while not self.stop_ev.wait(check):
+                try:
+                    self.check_settling()
+                except Exception as e:      # a bug or a bad answer must not stop the checking for good
+                    self.log("ERROR while checking the settling batches: %s" % e)
         self.wake.set()                   # resend what a former run left pending
         self.threads = [threading.Thread(target=flusher, daemon=True),
                         threading.Thread(target=sender, daemon=True)]
+        if self.view:
+            self.threads.append(threading.Thread(target=checker, daemon=True))
         for t in self.threads:
             t.start()
 
@@ -386,6 +569,18 @@ def main() -> None:
                     help="bytes of the transaction besides the metadata (plain ~300, contract ~1230)")
     ap.add_argument("--max-tries", type=int, default=5, help="failed submits before a batch goes to dead/")
     ap.add_argument("--retry", type=float, default=10.0, help="seconds between resends of pending batches")
+    ap.add_argument("--kupo", default=os.environ.get("KUPO_URL"),
+                    help="URL of Kupo, e.g. http://10.150.0.71:1442 (default: $KUPO_URL). With it, every submitted "
+                         "batch is kept until its transaction is final and is sent again if it vanishes; "
+                         "without it a batch counts as done when the submit command returns 0")
+    ap.add_argument("--final-blocks", type=int, default=FINAL_BLOCKS,
+                    help="blocks on top of a transaction until it is final (k)")
+    ap.add_argument("--confirm-interval", type=float, default=CONFIRM_INTERVAL,
+                    help="seconds between two looks at the batches that are not final yet")
+    ap.add_argument("--missing-grace", type=float, default=MISSING_GRACE,
+                    help="seconds a transaction may be missing in Kupo before its batch is sent again")
+    ap.add_argument("--container", default=None, help="pool 1 container name for the node tip (default: docker ps)")
+    ap.add_argument("--magic", type=int, default=reader.DEFAULT_MAGIC, help="network magic of the chain (net 1 = 42)")
     a = ap.parse_args()
     if a.B < 1 or a.T <= 0:
         ap.error("--B must be >= 1 and --T > 0")
@@ -393,19 +588,27 @@ def main() -> None:
         ap.error("--max-tries must be >= 1 and --tx-reserve between 0 and %d" % layout.MAX_TX)
     if not layout.valid_id(a.gateway_id):
         ap.error("--gateway-id: use A-Z a-z 0-9 _ . -, 1-32 characters, not starting with 0x")
+    if a.final_blocks < 1 or a.confirm_interval < 1 or a.missing_grace < 0:
+        ap.error("--final-blocks must be >= 1, --confirm-interval >= 1 and --missing-grace >= 0")
 
+    view = None
+    if a.kupo:
+        view = confirm.ChainView(reader.KupoClient(a.kupo), reader.DockerTip(a.container, a.magic))
     gw = Gateway(a.outbox, a.B, a.T, make_submit(a.submit, a.submit_command), a.gateway_id,
-                 tx_reserve=a.tx_reserve, max_tries=a.max_tries)
+                 tx_reserve=a.tx_reserve, max_tries=a.max_tries, view=view, final_blocks=a.final_blocks,
+                 missing_grace=a.missing_grace)
+    if a.submit == "command" and not view:
+        gw.log("WARNING no --kupo: batches are not followed until they are final (a replaced block loses them)")
     srv = Server((a.listen_host, a.listen_port), Handler)
     srv.gw = gw
-    gw.start(a.retry)
+    gw.start(a.retry, a.confirm_interval)
 
     def stop(*_):       # srv.shutdown() must not run in the thread that serves, so it gets its own thread
         threading.Thread(target=srv.shutdown).start()
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
-    gw.log("listening on %s:%d, B=%d T=%gs, outbox=%s, submit=%s" %
-           (a.listen_host, srv.server_address[1], a.B, a.T, a.outbox, a.submit))
+    gw.log("listening on %s:%d, B=%d T=%gs, outbox=%s, submit=%s, kupo=%s, final at %d blocks" %
+           (a.listen_host, srv.server_address[1], a.B, a.T, a.outbox, a.submit, a.kupo or "none", a.final_blocks))
     srv.serve_forever()
     srv.server_close()
     gw.shutdown()

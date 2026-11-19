@@ -195,6 +195,37 @@ class DockerTip:
         return {"block": int(d["block"]), "slot": int(d["slot"]), "hash": d["hash"]}
 
 
+# ---------------------------------------------------------------- how deep is a transaction?
+# One method for the web page (Reader below) and for the gateway (confirm.py): Kupo gives the slot of a transaction,
+# the node gives the tip (block number and slot). Kupo does not give block numbers, so the block of a transaction
+# is the tip block at the moment it was first seen, or an estimate from the slots when it was seen late.
+
+def blocks_per_slot(tip: Optional[Dict[str, Any]]) -> float:
+    """Average number of blocks per slot on this chain (from the tip), for depth estimates."""
+    if tip and tip["slot"] > 0 and tip["block"] > 0:
+        return tip["block"] / float(tip["slot"])
+    return FALLBACK_BLOCKS_PER_SLOT
+
+
+def estimated_block(tip: Optional[Dict[str, Any]], slot: int) -> Optional[int]:
+    """Block number of a transaction in `slot`, guessed from the tip and the blocks-per-slot ratio."""
+    if not tip:
+        return None
+    back = int(round(max(tip["slot"] - slot, 0) * blocks_per_slot(tip)))
+    return max(tip["block"] - back, 1)
+
+
+def first_seen_block(tip: Optional[Dict[str, Any]], tip_is_fresh: bool, slot: int) -> Tuple[Optional[int], bool]:
+    """(block, estimate) for a transaction that has just been found in `slot`.
+    A transaction found close to a fresh tip is in the tip block (or the next one); otherwise it is estimated."""
+    if not tip:
+        return None, True
+    if tip_is_fresh and tip["slot"] - slot <= LIVE_LAG_SLOTS:
+        # a tip that is older than the transaction means the transaction is in a newer block than the tip
+        return (tip["block"] + 1 if tip["slot"] < slot else tip["block"]), False
+    return estimated_block(tip, slot), True
+
+
 # ---------------------------------------------------------------- the registry (who may send)
 
 _B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"      # the 32 characters of the bech32 alphabet
@@ -368,31 +399,15 @@ class Reader:
             self._latch()
         return True
 
-    def _blocks_per_slot(self) -> float:
-        """Average number of blocks per slot on this chain (from the tip), for depth estimates."""
-        t = self.tip
-        if t and t["slot"] > 0 and t["block"] > 0:
-            return t["block"] / float(t["slot"])
-        return FALLBACK_BLOCKS_PER_SLOT
+    def _first_seen_block(self, slot: int) -> Tuple[Optional[int], bool]:
+        """(block, estimate) for a batch that has just been found."""
+        fresh = (self.first_poll_done and self.tip_time is not None
+                 and self.clock() - self.tip_time <= TIP_STALE_S)
+        return first_seen_block(self.tip, fresh, slot)
 
     def _estimated_block(self, slot: int) -> Optional[int]:
         """Block number of a batch in `slot`, guessed from the tip and the blocks-per-slot ratio."""
-        t = self.tip
-        if not t:
-            return None
-        back = int(round(max(t["slot"] - slot, 0) * self._blocks_per_slot()))
-        return max(t["block"] - back, 1)
-
-    def _first_seen_block(self, slot: int) -> Tuple[Optional[int], bool]:
-        """(block, estimate) for a batch that has just been found."""
-        t = self.tip
-        if not t:
-            return None, True
-        fresh = self.tip_time is not None and self.clock() - self.tip_time <= TIP_STALE_S
-        if self.first_poll_done and fresh and t["slot"] - slot <= LIVE_LAG_SLOTS:
-            # a tip that is older than the batch means the batch is in a newer block than the tip
-            return (t["block"] + 1 if t["slot"] < slot else t["block"]), False
-        return self._estimated_block(slot), True
+        return estimated_block(self.tip, slot)
 
     def _depth(self, rec: Dict[str, Any]) -> Optional[int]:
         """Blocks on top of the batch (1 = in the tip block); None if rolled back or not known."""
