@@ -1,12 +1,31 @@
 #!/bin/bash
 # Leader demo on the private Cardano chain: sensors -> gateways -> contract -> chain -> Kupo -> web page.
 # Runs on the Mac (it drives the chain VM over ssh) or INSIDE the Ubuntu VM (CHAIN_HOST=local). bash 3.2 compatible.
-# Seven steps (0..6). Every check prints a PASS or FAIL line (a FAIL is followed by a "hint:" line); SUMMARY at the end.
+# Nobody presses a key: the steps run one after the other. While steps 2..5 run, the page shows "Live demo, step N of 4"
+# with what is happening and switches to the matching view by itself. In the terminal every check prints PASS or FAIL
+# (a FAIL is followed by a "hint:" line); SUMMARY at the end.
+#
+# For a presentation (the live part takes about 1.5 to 2 minutes):
+#   ./demo.sh --prepare     BEFORE the talk, 5+ minutes early (then the first batches are already "Final"): steps 0
+#                           and 1. The page, gateway GW01 and its 10 sensors keep running.
+#   ./demo.sh --show        IN the talk: steps 2, 3, 4, 5 one after the other, shown on the page. Everything keeps
+#                           running afterwards, for questions. Before its clock starts it stops gateway B of an
+#                           earlier --show and starts GW01 if --prepare was not run (that time is not counted).
+#   ./demo.sh --step 6      AFTER the talk: clean stop; the registry is back to "GW01 approved, GW02 not".
+# Other ways to run it:
+#   ./demo.sh               the whole demo, steps 0 to 6 (rehearsal: PASS/FAIL for everything). --yes is the same.
+#   ./demo.sh --step N      only step N (0..6); it starts what it needs and stops it again at the end
+#   ./demo.sh --keep        with --step or the full run: do not stop the processes at the end (stop: --step 6)
+#   ./demo.sh --open        open the page in the browser (step 1; macOS only, on Linux the address is printed)
+#
+# Steps: 0 preflight   1 prepare: page server (+ ssh tunnel in Mac mode), gateway GW01 (approved) and 10 sensors
+#        2 GW02 (not approved) sends: the contract refuses it   3 the administrator approves GW02: both gateways write
+#        4 the administrator revokes GW01: its sensors go silent   5 GW01 approved again   6 clean stop
 #
 # Where it runs (setting CHAIN_HOST, see host.sh):
 #   Mac -> VM (default on macOS): runs on the MAC and drives the VM "seedvm" over ssh (CHAIN_HOST=seedvm, or another
 #     ssh alias); the Mac looks at the page through an ssh tunnel.
-#   local (default on Linux, CHAIN_HOST=local): you are INSIDE the Ubuntu VM (for example a VM on a Windows PC).
+#   local (default on Linux, CHAIN_HOST=local): you are INSIDE the Ubuntu VM (for example a VM on a Windows PC or Mac).
 #     Nothing is copied, no tunnel; the page is at http://127.0.0.1:8088 on the VM itself.
 #     To see it on another computer:
 #       ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>
@@ -17,39 +36,38 @@
 #   SEED_EMULATOR       folder of seed-emulator on the chain host (default ~/seed-emulator)
 #   PORT                page port (default 8088, from scripts/config.sh)
 #   MAGIC               network magic (default 42)
-#   DEMO_B, DEMO_T      gateway batch: B readings or T seconds (defaults 100, 10)
-#   DEMO_SILENT         the page marks a sensor silent after this many seconds without a reading (default 40)
+#   DEMO_B, DEMO_T      gateway batch: B readings or T seconds (defaults 100, 5)
+#   DEMO_SILENT         the page marks a sensor silent after this many seconds without a reading (default 30)
+#   DEMO_HOLD           --show: seconds between two steps, to look at the result (default 3)
 #   DEMO_CLOCK_STRICT   1 = a clock difference Mac/VM (more than 3 s) is a FAIL instead of a warning (default 0)
 #
-#   ./demo.sh                 the whole demo, a pause "press Enter" before every step
-#   ./demo.sh --yes           no pauses (rehearsal: tells you with PASS/FAIL whether everything works)
-#   ./demo.sh --step N        only step N (0..6); it starts what it needs and stops it again at the end
-#   ./demo.sh --keep          with --step: do not stop the processes at the end (stop later with --step 6)
-#   ./demo.sh --open          open http://127.0.0.1:8088 in the browser (step 1; macOS only, on Linux the address is printed)
-#
-# Steps: 0 preflight  1 page server (+ tunnel in Mac mode)  2 gateway GW01 (enrolled) + 10 sensors
-#        3 gateway GW02: refused while NOT enrolled, then enrolled: from then on both gateways write
-#        4 revoke GW01, then enrol again  5 one sensor goes silent  6 clean stop
 # Processes on the chain host log to /tmp/demo-logs/<name>.log, outboxes are in /tmp/demo-run-<time>/ (not in the repo).
-# The registry must end with A enrolled, B not enrolled (also after Ctrl-C: the cleanup repairs it).
-# Exception: --step 3 --keep leaves gateway B running and enrolled; the next --step 6 revokes it.
+# The registry must end with A enrolled, B not enrolled. Ctrl-C (in any mode) stops everything the demo started,
+# the page too, and repairs the registry. Exceptions: --show and "--step 3 --keep" leave gateway B running and
+# enrolled; the next --step 6 revokes it. A second --prepare refuses to start while the first one still runs
+# (preflight: leftover processes): run --step 6 first.
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/experiments/demo
 . "$ROOT/scripts/config.sh"     # REPO, P0_DIR, KUPO_PORT, PAGE_PORT (lab settings)
 
-YES=0; ONLY=""; OPEN=0; KEEP=0
+ONLY=""; OPEN=0; KEEP=0
+MODE=full                            # full (0..6), prepare (0, 1), show (2..5) or step (only --step N)
 while [ $# -gt 0 ]; do
   case "$1" in
-    --yes) YES=1;;
+    --yes) ;;                        # there are no pauses any more; kept so that older notes still work
+    --prepare) MODE=prepare; KEEP=1;;
+    --show) MODE=show; KEEP=1;;
     --open) OPEN=1;;
     --keep) KEEP=1;;
-    --step) shift; ONLY=${1:-};;
-    -h|--help) sed -n '2,33p' "$0"; exit 0;;
+    --step) shift; ONLY=${1:-}; MODE=step;;
+    -h|--help) sed -n '2,/^ROOT=/p' "$0" | sed '$d'; exit 0;;
     *) echo "unknown option $1 (try --help)"; exit 1;;
   esac
   shift
 done
-case "$ONLY" in ""|0|1|2|3|4|5|6) ;; *) echo "--step needs a number 0..6"; exit 1;; esac
+if [ $MODE = step ]; then
+  case "$ONLY" in 0|1|2|3|4|5|6) ;; *) echo "--step needs a number 0..6"; exit 1;; esac
+fi
 
 # ======================================================================================================
 # Settings (override with environment variables)
@@ -57,8 +75,11 @@ case "$ONLY" in ""|0|1|2|3|4|5|6) ;; *) echo "--step needs a number 0..6"; exit 
 MAGIC=${MAGIC:-42}                   # network magic of net 1 (scripts/lib.sh would give 41 + NET)
 PORT=${PORT:-$PAGE_PORT}             # port of the web page on the chain host (and of the ssh tunnel on the Mac)
 GWA_PORT=9101; GWB_PORT=9102         # the sensors of gateway A / B send to these ports
-B=${DEMO_B:-100}; T=${DEMO_T:-10}    # gateway batch: 100 readings or 10 s
-SILENT=${DEMO_SILENT:-40}            # page: a sensor is silent after this many seconds without a new reading
+B=${DEMO_B:-100}; T=${DEMO_T:-5}     # gateway batch: 100 readings or 5 s (short: the live part must fit 2 minutes)
+# page: a sensor is silent after this many seconds without a new reading. Blocks come every 5 s on average, but a gap
+# of 20 s happens now and then; 30 s keeps healthy sensors from flickering to "silent".
+SILENT=${DEMO_SILENT:-30}
+HOLD=${DEMO_HOLD:-3}                 # --show: seconds between two steps
 NA=10; NB=5                          # number of sensors of gateway A / B (1 reading per second each)
 B_FIRST=11                           # B's sensors are AGRI_011 ... AGRI_015 (A's are AGRI_001 ... AGRI_010)
 
@@ -87,7 +108,6 @@ say() { printf '%s\n' "$*"; }
 hr() { printf '\n==================== %s\n' "$*"; }
 # explain LINE...: the text the presenter reads aloud before a step.
 explain() { printf '\n'; for l in "$@"; do printf '  %s\n' "$l"; done; printf '\n'; }
-pause() { [ $YES = 1 ] && return 0; printf '  [press Enter to start this step] '; read -r _ < /dev/tty; }
 
 # ok / bad / hint print the check lines that people and docs rely on (PASS / FAIL / hint:).
 FAILS=0; NCHK=0
@@ -112,10 +132,27 @@ count_live() {
 }
 # count_live_from FIRST N: how many of the sensors AGRI_<FIRST> ... AGRI_<FIRST+N-1> are live on the page (B's sensors)
 count_live_from() {
-  page_state "sum(1 for x in s['sensors'] if x['sensor'] in ['AGRI_%03d'%i for i in range($1,$1+$2)] and not x['silent'])"
+  page_state "sum(1 for x in s['sensors']
+                  if x['sensor'] in ['AGRI_%03d' % i for i in range($1, $1 + $2)] and not x['silent'])"
 }
-is_silent() { page_state "[x['silent'] for x in s['sensors'] if x['sensor']=='$1'][0]"; }
 kupo_ok() { [ "$(page_state "s['kupo']['ok']")" = True ]; }
+
+# ---- the "Live demo" box on the page (server.py: POST /api/demo) ----
+# page_phase STEP TAB TITLE DETAIL [STATE]: tell the page which step of the live demo runs, so that the audience
+# sees it without anybody switching to the terminal. STEP 1..4 = demo steps 2..5; TAB = the view the page switches to
+# (sensors, trust, details or empty); STATE = running (default), done, finished, or off (no box). Also printed here.
+page_phase() {
+  local json
+  json=$(python3 -c '
+import json, sys
+step, tab, title, detail, state = sys.argv[1:6]
+steps = ["GW02 is refused", "Approve GW02", "Revoke GW01", "Approve GW01 again"]
+print(json.dumps({"step": int(step), "total": len(steps), "steps": steps, "tab": tab, "title": title,
+                  "detail": detail, "state": state}))' "$1" "$2" "$3" "$4" "${5:-running}")
+  curl -s -m 3 -X POST -H 'Content-Type: application/json' --data "$json" "$URL/api/demo" > /dev/null 2>&1
+  [ -n "$4" ] && say "  [page] $4"
+  return 0
+}
 # as_number VALUE -> VALUE if it is all digits, else 0 (the page may answer with nothing)
 as_number() { case "$1" in ''|*[!0-9]*) echo 0;; *) echo "$1";; esac; }
 
@@ -185,6 +222,19 @@ start_gateway() {
   vmx start gw$g $VPIPE "$gw_cmd" | tail -1
 }
 
+# took_seconds LINE: "took 8.6 s" from the last line of p1-enroll.sh / p1-revoke.sh ("... took 8632 ms"), else empty
+took_seconds() {
+  printf '%s\n' "$1" | sed -n 's/.*took \([0-9][0-9]*\) ms.*/\1/p' | awk '{ printf "took %.1f s", $1 / 1000 }'
+}
+
+# ensure_gw01: gateway A and its sensors run, and the page shows them live (starts them when they are missing)
+ensure_gw01() {
+  remote_alive gwA || say "  $(start_gateway A)"
+  remote_alive sensorsA || say "  $(start_sensors sensorsA $GWA_PORT $NA)"
+  wait_for 120 '[ "$(as_number "$(count_live $NA)")" -ge $((NA - 1)) ]' \
+    'echo "live sensors of GW01: $(count_live $NA) of $NA"' > /dev/null
+}
+
 # start_sensors NAME PORT COUNT [extra args]. Each call gets a new range of sequence numbers
 # (epoch + 1000000 * k) so that restarted sensors never reuse a number.
 SEQK=0
@@ -208,6 +258,15 @@ restore_registry() {
   [ "${1:-}" = --keep-b ] && keep_b=1
   r=$(ctr bash $SCRIPTS_IN_CTR/p1-list.sh $MAGIC | tail -1)
   case "$r" in
+    *"REGISTRY size="*) ;;
+    *)
+      # the list could not be read (for example registry.ref points to a spent coin after an interrupted change):
+      # p1-enroll.sh finds the current registry coin by its token and repairs registry.ref; enrolling A is harmless
+      say "cleanup: the registry list could not be read ($r); repairing it"
+      ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1
+      r=$(ctr bash $SCRIPTS_IN_CTR/p1-list.sh $MAGIC | tail -1);;
+  esac
+  case "$r" in
     *A=not-enrolled*) say "cleanup: enrolling A again"; ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1;;
   esac
   if [ $keep_b = 0 ]; then
@@ -217,6 +276,19 @@ restore_registry() {
     B_ENROLLED=0
   fi
   REVOKED=0
+}
+
+# reset_for_show: the state the live part starts from: gateway B stopped and not on the list, A on the list and
+# sending (an earlier --show leaves B running and enrolled). Runs before the clock of the live part starts.
+reset_for_show() {
+  page_phase 0 "" "" "" off  # an old "Live demo finished" box goes away while we prepare
+  if remote_alive gwB || remote_alive sensorsB; then
+    say "  stopping gateway B of an earlier run"
+    vmx stop sensorsB 2>/dev/null | sed 's/^/  /'
+    vmx stop gwB 2>/dev/null | sed 's/^/  /'
+  fi
+  restore_registry
+  ensure_gw01
 }
 
 # Stop everything the demo started and repair the registry (runs once, at the end and on Ctrl-C).
@@ -261,7 +333,10 @@ finish() {
 sync_demo() { push "$HERE/" $REPO/experiments/demo/; }
 
 # For --step N without step 0: find the container, the run directory and the Kupo address.
+BASICS_DONE=0
 need_basics() {
+  [ $BASICS_DONE = 1 ] && return 0
+  BASICS_DONE=1
   sync_demo
   [ -n "$CTR" ] || CTR=$(vmx ctr | tail -1)
   [ -n "$CTR" ] || { say "pool 1 container not found: is the chain up?"; exit 1; }
@@ -494,7 +569,7 @@ step0() {
   hr "STEP 0: preflight (is everything ready?)"
   explain "We check the chain, the indexer (Kupo), the clocks, the disk, the scripts in the container and the registry list." \
           "Look for: only PASS lines. On a FAIL the demo stops and says what to do."
-  pause; begin
+  begin
 
   preflight_machine || { finish 0; return 1; }
   preflight_vm_tools || { finish 0; return 1; }
@@ -513,19 +588,21 @@ step0() {
 }
 
 # ======================================================================================================
-# STEP 1: the page server (and the tunnel)
+# STEP 1: prepare: the page server (and the tunnel), gateway A (approved) with 10 sensors
 # ======================================================================================================
-# What the audience sees: the page opens in the browser, shows the chain tip moving and Kupo "ok".
+# What the audience sees (if they already look): the page with the chain tip moving, GW01's batches arriving, 10 live
+# sensors. For a presentation this step runs BEFORE the talk (--prepare): after 5 minutes the first batches are Final.
 step1() {
   if [ $LOCAL = 1 ]; then
-    hr "STEP 1: start the page server on this machine"
+    hr "STEP 1: prepare: the page server on this machine, gateway GW01 and $NA sensors"
   else
-    hr "STEP 1: start the page server on $CHAIN_HOST and the ssh tunnel"
+    hr "STEP 1: prepare: the page server on $CHAIN_HOST and the ssh tunnel, gateway GW01 and $NA sensors"
   fi
   explain "The page server reads the chain through Kupo (it keeps nothing of its own) and shows sensors, batches and gateways." \
-          "Look for: the page opens at $URL; it shows the chain tip moving and Kupo 'ok'." \
-          "Old sensor values from earlier runs may be on it: they go 'silent' after $SILENT s, that is normal."
-  pause; begin
+          "Gateway A (shown as GW01) is on the registry list. $NA sensors send 1 reading per second each; every $T s" \
+          "the gateway signs one transaction with its own key and the contract lets it in." \
+          "Look for: the page at $URL, the chain tip moving, GW01's batches arriving, $NA sensors live."
+  begin
   need_basics; ensure_run
   say "  $(start_server)"
   start_tunnel
@@ -541,6 +618,37 @@ step1() {
   fi
   tip_block=$(page_state "s['tip']['block']")
   [ -n "$tip_block" ] && ok "page shows the chain tip: block $tip_block" || bad "page has no tip"
+  page_phase 0 "" "" "" off  # an old "Live demo" box from an earlier run goes away
+
+  say "  $(start_gateway A)"
+  say "  $(start_sensors sensorsA $GWA_PORT $NA)"
+  local batches_before
+  batches_before=$(as_number "$(gw_field GW01 batches)")
+  say "  waiting for 2 batches of GW01 to be sent and to show up on the page (about 20 s) ..."
+  wait_for 150 \
+    '[ "$(batches_sent A)" -ge 2 ] && [ "$(as_number "$(gw_field GW01 batches)")" -ge $((batches_before + 2)) ]' \
+    'echo "sent=$(batches_sent A) page batches=$(gw_field GW01 batches) receipts=$(gw_field GW01 receipts)"'
+
+  local sent page_batches receipts dead live
+  sent=$(batches_sent A)
+  page_batches=$(as_number "$(gw_field GW01 batches)")
+  receipts=$(gw_field GW01 receipts)
+  dead=$(dead_count $RUN/outboxA)
+  [ "$sent" -ge 2 ] && ok "gateway A sent $sent batches (log)" || bad "gateway A sent only $sent batches"
+  if [ "$page_batches" -ge $((batches_before + 2)) ]; then
+    ok "page shows $page_batches batches of GW01 (was $batches_before), receipts counter = $receipts"
+  else
+    bad "page shows only $page_batches batches of GW01 (was $batches_before)"
+    hint "Kupo behind? ./demo.sh --step 0; gateway log: /tmp/demo-logs/gwA.log"
+  fi
+  [ "$dead" -eq 0 ] && ok "no dead-letter batches of A" || bad "$dead dead-letter batches of A"
+  live=$(as_number "$(count_live $NA)")
+  if [ "$live" -ge $((NA - 1)) ]; then
+    ok "$live of $NA sensors of GW01 are live on the page"
+  else
+    bad "only $live of $NA sensors live on the page"
+    hint "readings arrive in batches every ~$T s; wait or raise DEMO_SILENT"
+  fi
 
   say "  run directory on $HLBL: $RUN"
   say "  >>> open $URL in the browser <<<"
@@ -555,242 +663,202 @@ step1() {
 }
 
 # ======================================================================================================
-# STEP 2: gateway A (enrolled) with 10 sensors
+# STEP 2: gateway B (NOT approved) sends: the contract refuses it
 # ======================================================================================================
-# What the audience sees: batches appear on the page, the depth bar grows, GW01's receipts counter rises.
+# What the audience sees: view Trust, GW02 "Not approved" with 0 batches; the box says its batch was REFUSED.
 step2() {
-  hr "STEP 2: gateway GW01 (enrolled) and $NA sensors"
-  explain "Gateway A (shown as GW01) is on the registry list. $NA sensors send 1 reading per second each." \
-          "The gateway makes a batch every $T s, signs one transaction with its own key and the contract lets it in." \
-          "Look at the page: batches appearing in the list, the depth bar of each batch growing as blocks are added," \
-          "the 'receipts' counter of GW01 rising by one per batch, the sensor values and charts moving."
-  pause; begin
+  hr "STEP 2: gateway GW02 (not approved) sends: the contract refuses it"
+  explain "Gateway B (GW02) has its own funded wallet and its own key, but it is not on the registry list." \
+          "It builds the same kind of transaction; the contract refuses it, nothing of GW02 reaches the chain." \
+          "The gateway moves the batch to dead/ and goes on."
+  begin
   need_basics; ensure_page
-  say "  $(start_gateway A)"
-  say "  $(start_sensors sensorsA $GWA_PORT $NA)"
+  local gw02_before        # GW02 batches already on the chain from earlier runs (Kupo shows them again)
+  gw02_before=$(as_number "$(gw_field GW02 batches)")
+  page_phase 1 trust "Gateway GW02 is not on the approved list" \
+    "GW02 starts sending: its own key, its own wallet, the same kind of transaction as GW01 ..."
+  say "  $(start_gateway B)"
+  say "  $(start_sensors sensorsB $GWB_PORT $NB --first-id $B_FIRST)"
+  say "  waiting for the first refused batch (about 10 s) ..."
+  wait_for 90 '[ "$(batches_refused B)" -ge 1 ]' 'echo "refused=$(batches_refused B) dead=$(dead_count $RUN/outboxB)"'
+  page_phase 1 trust "Gateway GW02 is not on the approved list" \
+    "Its batch was REFUSED by the smart contract: nothing of GW02 reaches the chain." done
 
-  local batches_before
-  batches_before=$(as_number "$(gw_field GW01 batches)")
-  say "  waiting for 3 batches to be sent and to show up on the page (about 40 s) ..."
-  wait_for 150 \
-    '[ "$(batches_sent A)" -ge 3 ] && [ "$(as_number "$(gw_field GW01 batches)")" -ge $((batches_before + 3)) ]' \
-    'echo "sent=$(batches_sent A) page batches=$(gw_field GW01 batches) receipts=$(gw_field GW01 receipts)"'
-
-  local sent page_batches receipts dead depth live
-  sent=$(batches_sent A)
-  page_batches=$(as_number "$(gw_field GW01 batches)")
-  receipts=$(gw_field GW01 receipts)
-  dead=$(dead_count $RUN/outboxA)
-  [ "$sent" -ge 3 ] && ok "gateway A sent $sent batches (log)" || bad "gateway A sent only $sent batches"
-  if [ "$page_batches" -ge $((batches_before + 3)) ]; then
-    ok "page shows $page_batches batches of GW01 (was $batches_before), receipts counter = $receipts"
+  local refused dead sent page_batches
+  refused=$(batches_refused B); dead=$(dead_count $RUN/outboxB); sent=$(batches_sent B)
+  if [ "$refused" -ge 1 ]; then
+    ok "gateway B: $refused batch(es) REFUSED by the contract"
   else
-    bad "page shows only $page_batches batches of GW01 (was $batches_before)"
-    hint "Kupo behind? ./demo.sh --step 0; gateway log: /tmp/demo-logs/gwA.log"
+    bad "gateway B: nothing refused"; hint "gateway log: /tmp/demo-logs/gwB.log"
   fi
-  depth=$(as_number "$(page_state "([b['depth'] for b in s['batches'] if b['signer_name']=='GW01'] + [0])[0] or 0")")
-  if [ "$depth" -ge 1 ]; then
-    ok "depth bar: the newest batch of GW01 is $depth blocks deep (it grows with every block)"
+  [ "$dead" -ge 1 ] && ok "$dead batch file(s) moved to dead/ (not on the chain)" || bad "no file in dead/"
+  [ "$sent" -eq 0 ] && ok "gateway B sent nothing" || bad "gateway B reports $sent batches sent!"
+  page_batches=$(as_number "$(gw_field GW02 batches)")
+  if [ "$page_batches" -eq "$gw02_before" ]; then
+    ok "page shows no new batch from GW02 (still $page_batches)"
   else
-    bad "the newest batch of GW01 has no depth yet"
+    bad "page shows $((page_batches - gw02_before)) new batch(es) from GW02!"
   fi
-  [ "$(as_number "$receipts")" -ge 3 ] && ok "receipts counter of GW01 is $receipts" \
-    || bad "receipts counter of GW01 is '$receipts' (expected >= 3)"
-  [ "$dead" -eq 0 ] && ok "no dead-letter batches of A" || bad "$dead dead-letter batches of A"
-  live=$(as_number "$(count_live $NA)")
-  if [ "$live" -ge $((NA - 1)) ]; then
-    ok "$live of $NA sensors are live on the page"
-  else
-    bad "only $live of $NA sensors live on the page"
-    hint "readings arrive in batches every ~$T s; wait or raise DEMO_SILENT"
-  fi
-  say "  last gateway lines:"; vmx lines gwA '^[0-9:]* (batch|sent)' 4 | sed 's/^/    /'
+  say "  the refusal, one line from the gateway log:"; vmx lines gwB 'REFUSED' 1 | sed 's/^/    /'
   finish 2
   [ $FAILS -eq 0 ]
 }
 
 # ======================================================================================================
-# STEP 3: gateway B is refused while it is NOT enrolled; then the administrator enrols it and both gateways write
+# STEP 3: the administrator approves gateway B; from then on both gateways write
 # ======================================================================================================
-# What the audience sees: REFUSED lines and GW02 at 0 batches; after the enrolment GW02 "Approved", its batches and
-# its 5 sensor cards (AGRI_011 ... AGRI_015) appear next to GW01's. Both gateways keep running until step 6.
+# What the audience sees: GW02 turns "Approved" (header 2 of 2), its batches appear; then the view Sensors shows a
+# second group "Gateway GW02" with AGRI_011 ... AGRI_015 next to GW01's ten sensors.
 step3() {
-  hr "STEP 3: gateway GW02 with $NB sensors: refused while not enrolled, then enrolled"
-  explain "Gateway B (GW02) has its own funded wallet and its own key, but it is not on the registry list." \
-          "It builds the same kind of transaction. The contract (checked by the node when the transaction is submitted)" \
-          "refuses it: no batch of GW02 is written to the chain. The gateway moves the batch to dead/ and goes on." \
-          "Then the administrator puts GW02 on the list (one transaction). GW02's next batches are accepted:" \
-          "from then on BOTH gateways write. Look for: REFUSED lines and GW02 at 0 batches; after the enrolment GW02" \
-          "'Approved' on Trust, its batches and its sensors AGRI_011 ... AGRI_015 next to GW01's."
-  pause; begin
+  hr "STEP 3: the administrator approves GW02: from now on both gateways write"
+  explain "The administrator (a dedicated key, not the key of any gateway) puts GW02 on the list with one transaction." \
+          "GW02's next batch is accepted by the same contract that refused it a moment ago."
+  begin
   need_basics; ensure_page
-  say "  $(start_gateway B)"
-  say "  $(start_sensors sensorsB $GWB_PORT $NB --first-id $B_FIRST)"
+  remote_alive gwB || say "  $(start_gateway B)"
+  remote_alive sensorsB || say "  $(start_sensors sensorsB $GWB_PORT $NB --first-id $B_FIRST)"
+  page_phase 2 trust "The administrator approves GW02" \
+    "One transaction puts GW02 on the list that is stored on the chain ..."
 
-  # -- part 1: not enrolled, refused --
-  say "  waiting for 2 refused batches (about 35 s) ..."
-  wait_for 120 '[ "$(batches_refused B)" -ge 2 ]' 'echo "refused=$(batches_refused B) dead=$(dead_count $RUN/outboxB)"'
-  local refused dead sent page_batches
-  refused=$(batches_refused B); dead=$(dead_count $RUN/outboxB); sent=$(batches_sent B)
-  if [ "$refused" -ge 2 ]; then
-    ok "gateway B: $refused batches REFUSED by the contract"
-  else
-    bad "gateway B: only $refused refused"; hint "gateway log: /tmp/demo-logs/gwB.log"
-  fi
-  [ "$dead" -ge 2 ] && ok "$dead batch files moved to dead/ (not on the chain)" || bad "only $dead files in dead/"
-  [ "$sent" -eq 0 ] && ok "gateway B sent nothing" || bad "gateway B reports $sent batches sent!"
-  sleep 6
-  page_batches=$(as_number "$(gw_field GW02 batches)")
-  [ "$page_batches" -eq 0 ] && ok "page shows 0 batches from GW02" || bad "page shows $page_batches batches from GW02!"
-  say "  the refusal, one line from the gateway log:"; vmx lines gwB 'REFUSED' 1 | sed 's/^/    /'
-  say "  the batch moved to dead/:"; vm "ls $RUN/outboxB/dead | head -2" | sed 's/^/    /'
-
-  # -- part 2: the administrator enrols B; from now on both gateways write --
   say "  the administrator enrols B ..."
   B_ENROLLED=1
-  local enrol_out; enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC B | tail -1); say "    $enrol_out"
+  local enrol_out took
+  enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC B | tail -1); say "    $enrol_out"
+  took=$(took_seconds "$enrol_out")
   case "$enrol_out" in
-    OK:*) ok "registry: B enrolled ($(echo "$enrol_out" | sed 's/.*took/took/'))";;
+    OK:*) ok "registry: B enrolled ($took)";;
+    *"already enrolled"*) ok "registry: B was enrolled already";;
     *) bad "enrol of B failed: $enrol_out";;
   esac
-  local sent_at_enrol; sent_at_enrol=$(batches_sent B)
-  say "  waiting for 2 batches of B to be accepted and to show up on the page (about 30 s) ..."
-  wait_for 150 \
-    '[ "$(batches_sent B)" -ge $((sent_at_enrol + 2)) ] && [ "$(as_number "$(gw_field GW02 batches)")" -ge 2 ]' \
-    'echo "B sent=$(batches_sent B) page: GW02 batches=$(gw_field GW02 batches) GW01 batches=$(gw_field GW01 batches)"'
+  page_phase 2 trust "The administrator approves GW02" \
+    "GW02 is on the list now${took:+ ($took)}. Its next batch goes through ..."
+
+  local sent_at_enrol gw02_before
+  sent_at_enrol=$(batches_sent B); gw02_before=$(as_number "$(gw_field GW02 batches)")
+  say "  waiting for a batch of B to be accepted and to show up on the page (about 15 s) ..."
+  wait_for 120 \
+    '[ "$(batches_sent B)" -gt $sent_at_enrol ] && [ "$(as_number "$(gw_field GW02 batches)")" -gt $gw02_before ]' \
+    'echo "B sent=$(batches_sent B) page: GW02 batches=$(gw_field GW02 batches)"'
+  page_phase 2 sensors "The administrator approves GW02" \
+    "GW02's batches are accepted: both gateways write. Its sensors AGRI_011 ... AGRI_015 appear." done
+  wait_for 30 '[ "$(as_number "$(count_live_from $B_FIRST $NB)")" -ge $((NB - 1)) ]' \
+    'echo "live sensors of GW02: $(count_live_from $B_FIRST $NB) of $NB"' > /dev/null
+
   local sent_b page_b approved_b live_b
   sent_b=$(batches_sent B); page_b=$(as_number "$(gw_field GW02 batches)"); approved_b=$(gw_field GW02 approved)
   live_b=$(as_number "$(count_live_from $B_FIRST $NB)")
-  if [ "$sent_b" -ge $((sent_at_enrol + 2)) ]; then
-    ok "gateway B sent $((sent_b - sent_at_enrol)) batches after the enrolment"
+  if [ "$sent_b" -gt "$sent_at_enrol" ]; then
+    ok "gateway B sent $((sent_b - sent_at_enrol)) batch(es) after the enrolment"
   else
-    bad "gateway B sent no batches after the enrolment"; hint "gateway log: /tmp/demo-logs/gwB.log"
+    bad "gateway B sent no batch after the enrolment"; hint "gateway log: /tmp/demo-logs/gwB.log"
   fi
-  [ "$page_b" -ge 2 ] && ok "page shows $page_b batches of GW02" || bad "page shows only $page_b batches of GW02"
+  if [ "$page_b" -gt "$gw02_before" ]; then
+    ok "page shows $((page_b - gw02_before)) new batch(es) of GW02"
+  else
+    bad "page shows no new batch of GW02"
+  fi
   [ "$approved_b" = True ] && ok "page: GW02 is approved" || bad "page: GW02 approved = '$approved_b'"
   if [ "$live_b" -ge $((NB - 1)) ]; then
     ok "$live_b of $NB sensors of GW02 are live on the page (AGRI_011 ...)"
   else
     bad "only $live_b of $NB sensors of GW02 live on the page"
   fi
-  if remote_alive gwA; then
-    say "  both gateways write: GW01 $(gw_field GW01 batches) batches, GW02 $page_b batches on the page"
-  fi
   finish 3
   [ $FAILS -eq 0 ]
 }
 
 # ======================================================================================================
-# STEP 4: revoke gateway A while its sensors keep sending, then enrol it again
+# STEP 4: the administrator revokes gateway A while its sensors keep sending
 # ======================================================================================================
-# What the audience sees: REFUSED lines, A's sensors turn silent on the page; after the enrol they wake up.
+# What the audience sees: GW01 turns "Not approved" (header 1 of 2); in the view Sensors GW01's ten sensors turn
+# "Silent" after $SILENT s, GW02's five stay live.
 step4() {
-  hr "STEP 4: revoke GW01 while its sensors keep sending, then enrol it again"
-  explain "The administrator (a dedicated key, not the key of any gateway) replaces the registry coin with a new list without A." \
-          "A's sensors keep sending. A's next batches are refused (dead-letter) and the readings are lost." \
-          "Look for: the REFUSED lines; on the page the sensors turn 'silent' after $SILENT s without new data." \
-          "Then we enrol A again: new batches flow, the sensors on the page wake up. (The refused readings stay lost.)"
-  pause; begin
-  need_basics; ensure_page
-  remote_alive gwA || say "  $(start_gateway A)"
-  remote_alive sensorsA || say "  $(start_sensors sensorsA $GWA_PORT $NA)"
-  # make sure A is flowing first
-  wait_for 90 '[ "$(as_number "$(count_live $NA)")" -ge $((NA - 1)) ]' \
-    'echo "live sensors=$(count_live $NA)"' >/dev/null
+  hr "STEP 4: the administrator revokes GW01 while its sensors keep sending"
+  explain "The administrator replaces the registry coin with a new list without A. A's sensors keep sending, but A's" \
+          "batches are refused now (dead-letter): these readings are lost. GW02 is not affected."
+  begin
+  need_basics; ensure_page; ensure_gw01
 
-  local sent_before refused_before page_batches_before
-  sent_before=$(batches_sent A); refused_before=$(batches_refused A)
-  page_batches_before=$(as_number "$(gw_field GW01 batches)")
-  say "  before: A sent $sent_before batches, page shows $page_batches_before batches," \
-      "$(count_live $NA) of $NA sensors live"
-
-  # -- revoke A (the administrator spends the registry coin into a new list without A) --
+  local refused_before b_sent_before
+  refused_before=$(batches_refused A); b_sent_before=$(batches_sent B)
+  page_phase 3 trust "The administrator removes GW01 from the list" "One transaction: GW01 is no longer approved ..."
   say "  revoking A ..."; REVOKED=1
-  local revoke_out; revoke_out=$(ctr bash $SCRIPTS_IN_CTR/p1-revoke.sh $MAGIC A | tail -1); say "    $revoke_out"
+  local revoke_out took
+  revoke_out=$(ctr bash $SCRIPTS_IN_CTR/p1-revoke.sh $MAGIC A | tail -1); say "    $revoke_out"
+  took=$(took_seconds "$revoke_out")
   case "$revoke_out" in
-    OK:*"list size now"*) ok "registry: A revoked ($(echo "$revoke_out" | sed 's/.*took/took/'))";;
+    OK:*"list size now"*) ok "registry: A revoked ($took)";;
     *) bad "revoke failed: $revoke_out";;
   esac
+  page_phase 3 sensors "The administrator removes GW01 from the list" \
+    "GW01's batches are refused now. Its sensors turn Silent after $SILENT s without new data; GW02 keeps writing."
 
-  say "  waiting for 2 refused batches of A ..."
-  wait_for 120 '[ "$(batches_refused A)" -ge $((refused_before + 2)) ]' \
-    'echo "new refused=$(( $(batches_refused A) - refused_before ))"'
-  local refused_now; refused_now=$(batches_refused A)
-  if [ "$refused_now" -ge $((refused_before + 2)) ]; then
+  say "  waiting for a refused batch of A and for its sensors to turn silent on the page (about $((SILENT + 10)) s) ..."
+  wait_for 150 \
+    '[ "$(batches_refused A)" -gt $refused_before ] && [ "$(as_number "$(count_silent $NA)")" -ge $((NA - 1)) ]' \
+    'echo "A refused=$(( $(batches_refused A) - refused_before )) silent sensors of GW01=$(count_silent $NA) of $NA"'
+  page_phase 3 sensors "The administrator removes GW01 from the list" \
+    "GW01's sensors are Silent: their readings are refused. GW02's sensors stay live." done
+
+  local refused_now silent
+  refused_now=$(batches_refused A); silent=$(as_number "$(count_silent $NA)")
+  if [ "$refused_now" -gt "$refused_before" ]; then
     ok "A's batches are refused after the revoke ($((refused_now - refused_before)) REFUSED lines)"
   else
     bad "A is not refused after the revoke"
   fi
+  [ "$silent" -ge $((NA - 1)) ] && ok "page: $silent of $NA sensors of GW01 silent" \
+    || bad "page: only $silent of $NA sensors of GW01 silent"
+  if remote_alive gwB; then
+    if [ "$(batches_sent B)" -gt "$b_sent_before" ]; then ok "GW02 kept writing meanwhile"
+    else bad "GW02 sent nothing meanwhile"; fi
+  fi
   say "  one refusal:"; vmx lines gwA REFUSED 50 | tail -1 | sed 's/^/    /'
-
-  say "  waiting for the page to show A's sensors silent (silent after $SILENT s) ..."
-  wait_for 150 '[ "$(as_number "$(count_silent $NA)")" -ge $((NA - 1)) ]' \
-    'echo "silent sensors=$(count_silent $NA) of $NA"'
-  local silent; silent=$(as_number "$(count_silent $NA)")
-  if [ "$silent" -ge $((NA - 1)) ]; then
-    ok "page: $silent of $NA sensors silent"
-  else
-    bad "page: only $silent of $NA sensors silent"
-  fi
-
-  # -- enrol A again --
-  say "  enrolling A again ..."
-  local enrol_out; enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1); say "    $enrol_out"
-  case "$enrol_out" in
-    OK:*"list size now"*) ok "registry: A enrolled again ($(echo "$enrol_out" | sed 's/.*took/took/'))"; REVOKED=0;;
-    *) bad "enrol failed: $enrol_out";;
-  esac
-
-  local sent_at_enrol; sent_at_enrol=$(batches_sent A)
-  say "  waiting for new batches of A to flow and the sensors to wake up ..."
-  wait_for 150 \
-    '[ "$(batches_sent A)" -ge $((sent_at_enrol + 2)) ] && [ "$(as_number "$(count_live $NA)")" -ge $((NA - 1)) ]' \
-    'echo "new sent=$(( $(batches_sent A) - sent_at_enrol )) live sensors=$(count_live $NA)"'
-  local sent_after live page_batches_after
-  sent_after=$(batches_sent A)
-  live=$(as_number "$(count_live $NA)")
-  page_batches_after=$(as_number "$(gw_field GW01 batches)")
-  if [ "$sent_after" -ge $((sent_at_enrol + 2)) ]; then
-    ok "after re-enrol: $((sent_after - sent_at_enrol)) new batches sent"
-  else
-    bad "no new batches after re-enrol"
-  fi
-  if [ "$live" -ge $((NA - 1)) ]; then
-    ok "page: $live of $NA sensors live again, GW01 batches $page_batches_before -> $page_batches_after"
-  else
-    bad "page: only $live sensors live again"
-  fi
-  [ "$REVOKED" = 0 ] || restore_registry
   finish 4
   [ $FAILS -eq 0 ]
 }
 
 # ======================================================================================================
-# STEP 5: one sensor goes silent
+# STEP 5: gateway A is approved again: its sensors wake up
 # ======================================================================================================
-# What the audience sees: after $SILENT s without a reading the page marks AGRI_003 "silent" (the alarm).
+# What the audience sees: GW01 "Approved" again, its next batches go through, its sensors turn live again.
 step5() {
-  hr "STEP 5: one sensor goes silent (AGRI_003)"
-  explain "We restart the sensors of GW01; sensor AGRI_003 stops sending 20 s after the start, the other nine go on." \
-          "Look for: after $SILENT s without a new reading from the chain the page marks AGRI_003 'silent' (the alarm)," \
-          "the other sensors keep updating. Silence is measured on the server clock, not on the sensor clock."
-  pause; begin
+  hr "STEP 5: GW01 is approved again: its sensors wake up"
+  explain "The administrator puts A back on the list. A's next batches are accepted again." \
+          "The readings refused in the meantime stay lost: the gateway does not send them twice."
+  begin
   need_basics; ensure_page
   remote_alive gwA || say "  $(start_gateway A)"
-  vmx stop sensorsA 2>/dev/null | sed 's/^/  /'
-  say "  $(start_sensors sensorsA $GWA_PORT $NA --silent-sensor AGRI_003 --silent-after 20)"
-  say "  waiting for the silent alarm (about 20 s + batch time + $SILENT s) ..."
-  wait_for 200 '[ "$(is_silent AGRI_003)" = True ]' \
-    'echo "AGRI_003 silent=$(is_silent AGRI_003) live sensors=$(count_live $NA)"'
+  remote_alive sensorsA || say "  $(start_sensors sensorsA $GWA_PORT $NA)"
+  page_phase 4 trust "GW01 is approved again" "One transaction puts GW01 back on the list ..."
 
-  local agri3_silent live silent
-  agri3_silent=$(is_silent AGRI_003); live=$(as_number "$(count_live $NA)"); silent=$(as_number "$(count_silent $NA)")
-  [ "$agri3_silent" = True ] && ok "page: AGRI_003 is silent (alarm)" || bad "page: AGRI_003 is not silent"
-  if [ "$live" -ge $((NA - 2)) ] && [ "$silent" -le 2 ]; then
-    ok "the other sensors are not silent ($live live, $silent silent)"
-  else
-    bad "too many silent sensors: $silent silent, $live live"
-  fi
+  say "  enrolling A again ..."
+  local enrol_out took
+  enrol_out=$(ctr bash $SCRIPTS_IN_CTR/p1-enroll.sh $MAGIC A | tail -1); say "    $enrol_out"
+  took=$(took_seconds "$enrol_out")
+  case "$enrol_out" in
+    OK:*) ok "registry: A enrolled again ($took)"; REVOKED=0;;
+    *"already enrolled"*) ok "registry: A was enrolled already"; REVOKED=0;;
+    *) bad "enrol failed: $enrol_out";;
+  esac
+  page_phase 4 sensors "GW01 is approved again" \
+    "GW01 is on the list again${took:+ ($took)}: its next batches go through ..."
+
+  local sent_at_enrol; sent_at_enrol=$(batches_sent A)
+  say "  waiting for a new batch of A and for its sensors to wake up (about 15 s) ..."
+  wait_for 120 \
+    '[ "$(batches_sent A)" -gt $sent_at_enrol ] && [ "$(as_number "$(count_live $NA)")" -ge $((NA - 1)) ]' \
+    'echo "new batches of A=$(( $(batches_sent A) - sent_at_enrol )) live sensors of GW01=$(count_live $NA)"'
+  page_phase 4 sensors "GW01 is approved again" \
+    "Its sensors are live again: both gateways write. End of the live demo." done
+
+  local sent_after live
+  sent_after=$(batches_sent A); live=$(as_number "$(count_live $NA)")
+  [ "$sent_after" -gt "$sent_at_enrol" ] && ok "after re-enrol: $((sent_after - sent_at_enrol)) new batch(es) sent" \
+    || bad "no new batches after re-enrol"
+  [ "$live" -ge $((NA - 1)) ] && ok "page: $live of $NA sensors of GW01 live again" \
+    || bad "page: only $live sensors of GW01 live again"
+  [ "$REVOKED" = 0 ] || restore_registry --keep-b
   finish 5
   [ $FAILS -eq 0 ]
 }
@@ -804,8 +872,10 @@ step6() {
   explain "Sensors, gateways (they write out the last batch first), the page server and the tunnel are stopped." \
           "The registry goes back to the start: A enrolled, B not (B is revoked again)." \
           "Logs and outboxes stay in /tmp/demo-logs and $RUN on $HLBL."
-  pause; begin
+  begin
   need_basics
+  page_phase 0 "" "" "" off  # no "Live demo" box any more (the server stops anyway)
+  REVOKED=1; B_ENROLLED=1    # a new process does not know what earlier runs changed: always repair (also on Ctrl-C)
   CLEANED=0; cleanup
   restore_registry          # also repairs a list left by an earlier "--step 3 --keep" (B still enrolled)
 
@@ -852,22 +922,53 @@ summary() {
 }
 
 rc=0
-if [ -n "$ONLY" ]; then
-  # --step N: only that step ("--step 0" needs no container yet, it looks for it itself)
-  [ "$ONLY" = 0 ] && CLEANED=1
-  if [ "$ONLY" != 0 ]; then need_basics; fi
-  "step$ONLY" || rc=1
-else
-  # the whole demo: a failed preflight stops everything, a failed page server stops the steps
-  step0 || {
-    say; say "Preflight failed: the demo does not continue. Fix the FAIL lines above (see the hints) and run again."
-    summary; CLEANED=1; exit 1
-  }
-  for n in 1 2 3 4 5 6; do
-    "step$n" || rc=1
-    [ $n = 1 ] && [ $rc = 1 ] && { say "page server did not start: stopping"; break; }
-  done
-fi
+case $MODE in
+  step)
+    # --step N: only that step ("--step 0" needs no container yet, it looks for it itself)
+    [ "$ONLY" = 0 ] && CLEANED=1
+    if [ "$ONLY" != 0 ]; then need_basics; fi
+    "step$ONLY" || rc=1
+    ;;
+  prepare)
+    # before the talk: preflight and step 1; the page, GW01 and its sensors keep running (KEEP=1)
+    step0 || {
+      say; say "Preflight failed. Fix the FAIL lines above (see the hints) and run again."; summary; CLEANED=1; exit 1
+    }
+    step1 || rc=1
+    say
+    if [ $rc = 0 ]; then
+      say "READY. The page, GW01 and its sensors keep running. Open $URL; start the live part in the talk with:"
+      say "  ./experiments/demo/demo.sh --show        (about 1.5 to 2 minutes; best 5+ minutes from now)"
+    fi
+    ;;
+  show)
+    # in the talk: steps 2..5 one after the other, a short hold in between; everything keeps running (KEEP=1)
+    need_basics; ensure_page
+    say "getting the start state (not part of the live time) ..."
+    reset_for_show
+    show_start=$SECONDS
+    for n in 2 3 4 5; do
+      "step$n" || rc=1
+      [ $n != 5 ] && sleep "$HOLD"
+    done
+    show_time=$((SECONDS - show_start))
+    page_phase 4 sensors "Live demo finished" \
+      "Everything keeps running: look around in Sensors, Trust and Details." finished
+    say
+    say "the live part took $show_time s ($((show_time / 60)) min $((show_time % 60)) s). Stop later with --step 6."
+    ;;
+  full)
+    # the whole demo: a failed preflight stops everything, a failed step 1 (page, GW01) stops the steps
+    step0 || {
+      say; say "Preflight failed: the demo does not continue. Fix the FAIL lines above (see the hints) and run again."
+      summary; CLEANED=1; exit 1
+    }
+    for n in 1 2 3 4 5 6; do
+      "step$n" || rc=1
+      [ $n = 1 ] && [ $rc = 1 ] && { say "the page or GW01 did not start: stopping"; break; }
+    done
+    ;;
+esac
 summary
 for i in 0 1 2 3 4 5 6; do
   eval "r=\$RES$i"

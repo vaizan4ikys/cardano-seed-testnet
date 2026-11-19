@@ -3,7 +3,8 @@
 
   reader thread   asks Kupo for new batches every --poll seconds (reader.py)
   tip thread      asks the node for its tip every --tip-interval seconds (docker exec cardano-cli)
-  HTTP server     GET /  the page, GET /api/state  the data as JSON, GET /health  a short status
+  HTTP server     GET /  the page, GET /api/state  the data as JSON, GET /health  a short status,
+                  POST /api/demo  the demo script tells the page which step of the live demo is running
 
 Runs on the chain VM (seedvm). Reads: page.html, gateways.json (name -> wallet address), Kupo over HTTP, the node
 tip through `docker exec`. Writes nothing. Environment: KUPO_URL = default of --kupo.
@@ -22,6 +23,7 @@ import json
 import os
 import signal
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Type
 
@@ -31,10 +33,70 @@ HERE = os.path.dirname(os.path.abspath(__file__))     # page.html and gateways.j
 DEFAULT_KUPO = "http://10.150.0.71:1442"               # Kupo inside pool 1's container (lab address)
 DEFAULT_PORT = 8080
 REGISTRY_POLL_S = 3.0                                  # seconds between reads of the gateway registry
+DEMO_TABS = ("", "sensors", "trust", "details")        # the tabs a demo step may switch the page to
+DEMO_STATES = ("running", "done", "finished", "off")   # off = no demo strip on the page
+DEMO_MAX_BODY = 4096                                   # bytes: a status is a few short texts
 
 
-def make_handler(rd: reader.Reader, page_path: str) -> Type[BaseHTTPRequestHandler]:
-    """HTTP handler class serving GET / (page), /api/state (JSON for the page) and /health (short status)."""
+class DemoStatus:
+    """What the live demo (experiments/demo/demo.sh) is doing now; the page shows it in a strip under its header.
+
+    demo.sh posts one small JSON object per change; the page reads it back inside /api/state as "demo".
+    Kept in memory only: after a restart of the server there is no strip until demo.sh posts again.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._status: dict | None = None
+
+    @staticmethod
+    def clean(raw: dict) -> dict:
+        """Check a posted status and keep only the known fields (short texts, known tab and state names).
+
+        Raises ValueError when a field has the wrong type or value."""
+        def text(key: str, limit: int = 200) -> str:
+            value = raw.get(key, "")
+            if not isinstance(value, str):
+                raise ValueError("%s must be a string" % key)
+            return value[:limit]
+        step, total = raw.get("step", 0), raw.get("total", 0)
+        def whole(x):           # True/False are ints in Python: refuse them
+            return isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 20
+        if not (whole(step) and whole(total)):
+            raise ValueError("step and total must be whole numbers from 0 to 20")
+        steps = raw.get("steps", [])
+        if not (isinstance(steps, list) and len(steps) <= 20 and all(isinstance(x, str) for x in steps)):
+            raise ValueError("steps must be a list of strings")
+        tab, state = text("tab"), text("state") or "running"
+        if tab not in DEMO_TABS:
+            raise ValueError("tab must be one of %s" % ", ".join(t or '""' for t in DEMO_TABS))
+        if state not in DEMO_STATES:
+            raise ValueError("state must be one of %s" % ", ".join(DEMO_STATES))
+        return {"step": step, "total": total, "steps": [x[:80] for x in steps], "title": text("title"),
+                "detail": text("detail", 300), "tab": tab, "state": state}
+
+    def set(self, raw: dict) -> None:
+        """Store a new status (checked with clean) together with the time it arrived."""
+        status = self.clean(raw)
+        status["since"] = time.time()
+        with self._lock:
+            self._status = status
+
+    def get(self) -> dict | None:
+        """The current status with its age in seconds, or None when there is none (or it is "off")."""
+        with self._lock:
+            status = dict(self._status) if self._status else None
+        if not status or status["state"] == "off":
+            return None
+        status["age"] = round(time.time() - status.pop("since"), 1)
+        return status
+
+
+def make_handler(rd: reader.Reader, page_path: str,
+                 demo: DemoStatus | None = None) -> Type[BaseHTTPRequestHandler]:
+    """HTTP handler class serving GET / (page), /api/state (JSON for the page), /health (short status)
+    and POST /api/demo (the step of the live demo; a new, empty DemoStatus when none is given)."""
+    demo = demo or DemoStatus()
     class Handler(BaseHTTPRequestHandler):
         server_version = "sensorpage"
 
@@ -55,8 +117,9 @@ def make_handler(rd: reader.Reader, page_path: str) -> Type[BaseHTTPRequestHandl
                 except OSError:
                     self._send(500, b"page.html not found", "text/plain")
             elif path == "/api/state":
-                body = json.dumps(rd.state()).encode()
-                self._send(200, body, "application/json")
+                state = rd.state()
+                state["demo"] = demo.get()
+                self._send(200, json.dumps(state).encode(), "application/json")
             elif path == "/health":
                 s = rd.state(max_batches=0)
                 body = json.dumps({"ok": True, "kupo_ok": s["kupo"]["ok"],
@@ -65,6 +128,25 @@ def make_handler(rd: reader.Reader, page_path: str) -> Type[BaseHTTPRequestHandl
                 self._send(200, body, "application/json")
             else:
                 self._send(404, b"not found", "text/plain")
+
+        def do_POST(self):
+            # only /api/demo; the server listens on 127.0.0.1, so only this machine (or an ssh tunnel) can post
+            if self.path.split("?")[0] != "/api/demo":
+                self._send(404, b"not found", "text/plain")
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if not 0 < length <= DEMO_MAX_BODY:
+                self._send(400, b"body missing or too long", "text/plain")
+                return
+            try:
+                demo.set(json.loads(self.rfile.read(length)))
+            except (ValueError, TypeError, AttributeError) as err:     # bad JSON or a bad field
+                self._send(400, ("bad demo status: %s" % err).encode(), "text/plain")
+                return
+            self._send(200, b"ok", "text/plain")
 
         def log_message(self, fmt, *args):      # no line per request
             pass
@@ -120,7 +202,7 @@ def main() -> None:
     threads.append(loop_thread(rd.poll_tip, a.tip_interval))
     for t in threads:
         t.start()
-    httpd = ThreadingHTTPServer((a.host, a.port), make_handler(rd, a.page))
+    httpd = ThreadingHTTPServer((a.host, a.port), make_handler(rd, a.page, DemoStatus()))
     httpd.daemon_threads = True
 
     def shutdown(signum, frame):        # httpd.shutdown() blocks, so it runs in its own thread

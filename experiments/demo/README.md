@@ -21,7 +21,7 @@ The demo proves four things:
 
 | file | what |
 |---|---|
-| `demo.sh` | the 6-step demo (plus step 0, the preflight) |
+| `demo.sh` | the demo: `--prepare` before the talk, `--show` in the talk (4 live steps), `--step 6` after; without option the whole rehearsal (steps 0 to 6) |
 | `fresh.sh` | from nothing to a ready demo: new chain, contract, registry, gateway wallets. Tested end to end on 13 November 2026 |
 | `remote.sh` | helper that starts/stops the demo processes, keeps a pid file, counts log lines |
 | `in-container/p1-list.sh` | shows who is on the registry list (runs inside the pool-1 container) |
@@ -38,12 +38,18 @@ All commands are typed in the VM terminal (or over ssh from your PC or Mac), in 
 
 ```
 ./experiments/demo/fresh.sh --yes      # only when there is no chain yet, or the chain is dead: new chain + contract + registry
-./experiments/demo/demo.sh --yes       # rehearsal: no pauses, PASS/FAIL for every check, about 5 minutes
-./experiments/demo/demo.sh             # the real presentation: "press Enter" before each step
+./experiments/demo/demo.sh --prepare   # BEFORE the talk, 5+ minutes early: preflight + page + gateway GW01 with 10 sensors; ends with "READY"
+./experiments/demo/demo.sh --show      # IN the talk: the 4 live steps one after the other (about 1.5 to 2 minutes), nobody presses a key
+./experiments/demo/demo.sh --step 6    # AFTER the talk: clean stop (also after an interrupted run)
+./experiments/demo/demo.sh             # rehearsal: the whole demo, steps 0 to 6, PASS/FAIL for every check
 ./experiments/demo/demo.sh --step 3    # only one step (starts what it needs, stops it at the end; add --keep to leave it running)
-./experiments/demo/demo.sh --step 6    # clean stop (also after an interrupted run)
 ./stop.sh                              # stop the chain (removes the containers)
 ```
+
+There are no pauses: `demo.sh` never waits for a key. (`--yes` is still accepted and means the same as no option.)
+`--prepare` refuses to start while an earlier run is still running (the preflight reports leftover processes): run `--step 6` first.
+`--show` first puts the start state back (gateway GW02 stopped and not on the list, GW01 on the list and sending); this is not counted in the live time.
+At the end it prints `the live part took N s` and leaves everything running for questions.
 
 The page is at <http://127.0.0.1:8088> **inside the VM**. Open an ssh tunnel in a second terminal window and keep it open
 (`<user>` is your VM user name):
@@ -57,13 +63,14 @@ Then open <http://127.0.0.1:8088> in the browser of your PC or Mac.
 In local mode `demo.sh` opens no tunnel; step 1 prints `>>> open http://127.0.0.1:8088 in the browser <<<` and the ssh command of the tunnel.
 `--open` does nothing in local mode on Linux (it only works on macOS; the script says so). The page was checked through a tunnel (`http://127.0.0.1:8089` -> VM port 8088): it answered 200 and `/api/state` showed the registry as known.
 
-Step 0 refuses to go on when a check fails and prints a hint. Everything the demo starts is stopped when the script ends, also on Ctrl-C;
-if step 4 is interrupted between revoke and enrol, the cleanup enrols A again.
+Step 0 refuses to go on when a check fails and prints a hint. The rehearsal (no option) stops everything it started when it ends, also on Ctrl-C;
+`--prepare` and `--show` leave everything running (stop it with `--step 6`). If the demo is interrupted between the revoke and the new approval of GW01 (steps 4 and 5), the cleanup approves GW01 again.
 
 **Before a presentation:** make sure the chain is alive (`./experiments/demo/demo.sh --step 0`, all `PASS`). A chain that stood still for more than
 about 15 minutes (VM suspended, PC asleep) is dead: run `fresh.sh --yes` (see [`docs/INSTALL.md`](../../docs/INSTALL.md)).
-Run the rehearsal at least 10 minutes before the audience arrives: batches become "final" only about 5 minutes after they were written
-(60 blocks of about 5 s), so after a rehearsal the page already shows numbers under "Readings stored permanently".
+Run `--prepare` at least 5 minutes before the talk (earlier is fine): batches become "final" only about 5 minutes after they were written
+(60 blocks of about 5 s), so the page already shows numbers under "Readings stored permanently" when the audience looks.
+The day before, run the rehearsal (`./experiments/demo/demo.sh`, no option) once and check that every step says `PASS`.
 
 ### Second case: from the Mac to `seedvm` (our own setup)
 
@@ -75,9 +82,10 @@ Everything in the guide below is the same in both modes; only where the logs and
 
 | variable | default | meaning |
 |---|---|---|
-| `DEMO_T` | 10 | gateway batch time in seconds |
+| `DEMO_T` | 5 | gateway batch time in seconds |
 | `DEMO_B` | 100 | readings per batch (a batch goes out when it has B readings or after T seconds) |
-| `DEMO_SILENT` | 40 | the page marks a sensor silent after this many seconds without a new reading from the chain (the server's own default is 90) |
+| `DEMO_HOLD` | 3 | `--show`: seconds between two live steps, to look at the result |
+| `DEMO_SILENT` | 30 | the page marks a sensor silent after this many seconds without a new reading from the chain (the server's own default is 90) |
 | `PORT` | 8088 | page port (use another one if 8088 is busy, for example `PORT=8089 ./experiments/demo/demo.sh`) |
 | `DEMO_CLOCK_STRICT` | 0 | `1` turns a clock difference between your machine and the chain machine into a FAIL (only for the Mac mode) |
 | `SEED_EMULATOR` | `~/seed-emulator` | where the SEED Emulator clone is |
@@ -97,53 +105,74 @@ On the machine that runs the chain (the VM in local mode, `seedvm` in Mac mode):
 
 Open it in the browser. It keeps no data of its own: everything is read from the chain through Kupo about every 2 seconds.
 
+**Under the header:** on the left three big buttons, **Sensors**, **Trust** and **Details** (they replace the old small tabs). On the right the box **"Live demo - step N of 4"**
+with 4 progress bars, the title of the step and one line of what is happening right now. `demo.sh` posts this text to the page.
+During the live steps the page **switches to the matching view (Trust or Sensors) by itself**, so the presenter does not need to click or to look at the terminal.
+When no demo runs the box says "No demo running"; after `--show` it says "Live demo finished" for 2 minutes. You can still click the buttons at any time.
+
 **Header (always visible)**
 
 | number | meaning |
 |---|---|
 | Sensors live | sensors that sent a new reading in the last `DEMO_SILENT` seconds, out of all sensors seen on the chain (for example "10 of 10") |
 | Readings stored permanently | readings in batches that are **final**: 60 blocks deep, so nobody can change or remove them any more. It starts to grow about 5 minutes after the first batch |
-| Approved gateways | gateways on the registry list, out of the gateways the page knows by name (for example "1 of 2"). Read from the chain |
+| Approved gateways | gateways on the registry list, out of the gateways the page knows by name. Read from the chain. In the live demo: "1 of 2" at the start, "2 of 2" after step 3, "1 of 2" after the revoke in step 4, "2 of 2" after step 5 |
 
 Top right: "Blockchain connected - block N" (green) or "not reachable" (red).
 
-**Tab Sensors** (for everyone)
+**View Sensors** (for everyone)
 
 * Cards grouped by gateway. Each gateway has a badge: **Approved** or **Not approved** (from the registry on the chain) and "N of M sensors live".
 * Each card is one sensor and one kind of measurement (temperature, humidity, soil moisture): the latest value, a small curve and a badge:
   **Live**, **Silent** (no new reading for more than `DEMO_SILENT` seconds), or **Out of range** (the latest value is outside the limits, e.g. temperature below -40 or above 60 degrees; the simulated sensors send about 2 % such values).
 * **Click a card** to see the graph at the top: the last readings, lowest / average / highest. Move the mouse over the line to see a value, its time and its reading number (the graph pauses while the mouse is on it).
-* Every value on this tab was read back from the blockchain, not from the sensor.
+* Every value in this view was read back from the blockchain, not from the sensor.
 
-**Tab Trust** (for the questions "can I believe this?")
+**View Trust** (for the questions "can I believe this?")
 
 * **Who may send data?** A table of gateways: **Approved** or **Not approved**, batches stored, readings stored, time of the last data. The approved list is stored on the chain, read through Kupo every 3 seconds. A gateway that is not approved is refused by the contract.
 * **Is the stored data safe?** A batch is first **settling** ("Settling 12 / 60": it is in a block, but a rare rollback could still move it) and after 60 more blocks **final**. Three counters (final, settling, rolled back) and a bar.
 * **Latest batches**, with a **Verify** button for each: it opens the proof of that batch: the transaction id, the block and how many blocks are on top of it, the **fingerprint of the data**
   (a SHA-256 hash of the exact data of the batch: change one value and the fingerprint changes), who signed it, and in plain words what it proves ("these N readings were written to the blockchain by an approved gateway"). Click **Hide** to close it.
 
-**Tab Details** (technical): chain tip, Kupo status, server time, number of batches and readings, number of keys in the registry; the table of the latest batches with depth bars (and warnings, for example a batch that says it is from another gateway than the one that signed it); the table of gateways with wallet addresses and receipt counters. (A receipt is a token that only an approved gateway can mint, one per batch.)
+**View Details** (technical): chain tip, Kupo status, server time, number of batches and readings, number of keys in the registry; the table of the latest batches with depth bars (and warnings, for example a batch that says it is from another gateway than the one that signed it); the table of gateways with wallet addresses and receipt counters. (A receipt is a token that only an approved gateway can mint, one per batch.)
 
 ## What to say, step by step
 
-0. **Preflight.** "Before we start we check that the chain makes blocks, that the indexer is caught up, that the clock is right, and that the registry has gateway A on it and gateway B not."
-1. **Page.** "This is the page. It keeps no data of its own: it reads the chain. Top right: the chain is connected and the block number moves."
-   Click **Trust**: "Gateway GW01 is approved, GW02 is not. This list is stored on the blockchain. The header says 1 of 2." (A fresh chain has no sensors yet; old sensors from earlier runs turn Silent after 40 s.)
-2. **Approved gateway GW01, 10 sensors.** "10 sensors, one reading per second each. Every 10 seconds the gateway writes one transaction. The contract checks that the gateway is on the list."
-   On **Sensors**: cards appear under "Gateway GW01 - Approved", "Sensors live 10 of 10", values move. Click a card: graph.
-   On **Trust**: new batches appear; each is "Settling n / 60" and becomes "Final" after about 5 minutes. Click **Verify** on one: transaction, block, fingerprint.
-   "Readings stored permanently" grows only when batches turn final.
-3. **Gateway GW02: refused, then approved.** "GW02 has its own wallet and key and builds the same kind of transaction. The contract refuses it. Here is the line from the gateway log. The batch goes to `dead/`. Nothing of GW02 is on the page."
-   On **Trust**: GW02 is "Not approved - its data is refused", 0 batches. On **Sensors**: no cards for GW02. The header stays "1 of 2".
-   "Now the administrator puts GW02 on the list, with one transaction." On **Trust**: GW02 turns **Approved**, the header shows "2 of 2", and its batches appear.
-   On **Sensors**: a second group "Gateway GW02 - Approved" with 5 cards (AGRI_011 ... AGRI_015) next to GW01's ten. "From now on both gateways write."
-4. **Revoke and enrol.** "The administrator removes GW01 from the list. GW01's sensors keep sending, but the batches are refused now; these readings are lost. GW02 is not affected and keeps writing."
-   On **Trust**: within a few seconds GW01 turns **Not approved**, the header shows "1 of 2". After 40 s GW01's sensors turn **Silent**; GW02's stay live.
-   "Now we enrol GW01 again": GW01 is **Approved** again, "2 of 2"; the next batches go through and the sensors wake up.
-5. **One sensor silent.** "AGRI_003 stops sending. The page does not hear from it any more and shows **Silent** after 40 s; the other nine carry on." The header shows "Sensors live 9 of 10".
-6. **Stop.** "Everything the demo started is stopped; the registry is as before: GW01 approved, GW02 not."
+The whole presentation is 5 minutes; the live part is about 1.5 to 2 minutes. That leaves about 25 seconds for each of the 4 live steps: say one or two sentences, then let the page speak.
+
+### Before the talk (5+ minutes early)
+
+`./experiments/demo/demo.sh --prepare` runs step 0 (preflight: the chain makes blocks, the indexer is caught up, the clock is right, the registry has GW01 on it and GW02 not)
+and step 1 (the page server, in Mac mode the ssh tunnel, gateway GW01 approved, 10 sensors). It ends with `READY ...`.
+Open the page. *You should see:* "Chain connected", GW01 "Approved", "Sensors live 10 of 10", header "Approved gateways 1 of 2", the box "No demo running".
+Leave it alone: after about 5 minutes the first batches are "Final" and "Readings stored permanently" shows a number.
+(A fresh chain has no old sensors; sensors from earlier runs turn Silent after 30 s.)
+
+### In the talk: `./experiments/demo/demo.sh --show`
+
+Start it in the terminal, then look at the page: it moves by itself and the box "Live demo - step N of 4" tells what happens. Nobody presses a key.
+A short intro before you start (the first seconds are the start state being put back, not counted): "Sensors send readings to a gateway; the gateway writes them to a blockchain; a smart contract decides who may write. The page reads everything back from the chain."
+
+| Step | What the page shows by itself | What to say (short) |
+|---|---|---|
+| 2 GW02 is refused (~10 s) | switches to **Trust**: GW02 "Not approved - its data is refused", 0 batches; GW01 sends | "A second gateway starts sending, but it is not on the list. The contract refuses its data; nothing of it reaches the chain." |
+| 3 The administrator approves GW02 (~25 s) | **Trust**: GW02 turns **Approved**, header "2 of 2". Then **Sensors**: a second group with 5 sensors (AGRI_011 ... AGRI_015) next to GW01's AGRI_001 ... AGRI_010 | "One transaction puts GW02 on the list, stored on the chain. From now on both gateways write." |
+| 4 The administrator revokes GW01 (~40 s) | **Trust**: GW01 turns **Not approved**, header "1 of 2". **Sensors**: after 30 s GW01's 10 sensors turn **Silent**; GW02's stay live | "The administrator removes GW01. Its batches are refused now, so the page stops hearing from its sensors: the silent alarm. GW02 is not affected." |
+| 5 GW01 is approved again (~20 s) | GW01 **Approved**, header "2 of 2"; its next batches go through and its sensors wake up (**Live**) | "One transaction and GW01 is back; its sensors are live again. The administrator controls who may write, while the system runs." |
+
+Between the steps there is a 3 s hold (`DEMO_HOLD`). At the end the terminal prints `the live part took N s`; the page shows "Live demo finished" and everything keeps running.
+Use the time for questions: click a sensor card (graph), **Verify** on a batch in Trust (transaction, block, fingerprint of the data), or look at Details.
+"Readings stored permanently" grows only when batches turn final (60 blocks, about 5 minutes) - that is why `--prepare` runs early.
+
+### After the talk
+
+`./experiments/demo/demo.sh --step 6`: "Everything the demo started is stopped; the registry is back to GW01 approved, GW02 not."
 
 ## Timings
+
+The table below was measured with the **old 6-step flow** (batch every 10 s, silent after 40 s, one pause per step, with the old step "one sensor goes silent").
+The new live part (`--show`, batch every 5 s, silent after 30 s) is designed for 1.5 to 2 minutes; measured on 19 November 2026 on an Ubuntu 20.04 arm64 VM (2 CPUs, 4 GB RAM), local mode: 1 min 48 s, 1 min 29 s and 1 min 6 s in three runs, all steps PASS (the time depends on when the next blocks come). Per step: 2 refused 7-8 s, 3 approve GW02 9-25 s, 4 revoke GW01 32-49 s (the 30 s silent limit), 5 approve again 4-28 s; `--prepare` 25-60 s; `--step 6` 14-44 s.
 
 Rehearsal on the live chain, 12 November 2026, Mac mode, 10 sensors, B=100, T=10 s:
 
@@ -152,14 +181,14 @@ Rehearsal on the live chain, 12 November 2026, Mac mode, 10 sensors, B=100, T=10
 | 0 preflight | 4-7 | waits for one new block (about every 5 s on average) |
 | 1 page | 3-4 | |
 | 2 gateway A | 39-45 | 3 batches, one per 10 s, each a few seconds from submit to block |
-| 3 gateway B | 30-31 (before the enrolment of B was added) | 2 refused batches; since 19 Nov also the enrolment of B and 2 accepted batches (not timed yet) |
+| 3 gateway B | 30-31 | 2 refused batches (the old flow; the new flow is timed above) |
 | 4 revoke / enrol | 57-72 | revoke in a block 5.5 s, silent after about 15 s more, enrol 0.8-1.9 s (1.4-6 s measured by hand), new batches after about 18 s |
 | 5 silent sensor | 63-79 | 20 s until the sensor stops + batch time + 40 s silent limit |
 | 6 stop | 3-22 | gateways write out their last batch |
 
-Whole demo without pauses: about 4-5 minutes; with talking, plan 10-15 minutes.
+Whole old demo without pauses: about 4-5 minutes.
 
-The same rehearsal in local mode on an Ubuntu 20.04 arm64 VM with 2 CPUs and 4 GB RAM (19 November 2026, `demo.sh --yes`, all steps PASS, 5 min 15 s in total):
+The same rehearsal in local mode on an Ubuntu 20.04 arm64 VM with 2 CPUs and 4 GB RAM (19 November 2026, old flow, `demo.sh --yes`, all steps PASS, 5 min 15 s in total):
 step 0 4 s, step 1 1 s, step 2 102 s, step 3 29 s, step 4 78 s, step 5 71 s, step 6 30 s. Steps 2 and 4 to 6 are slower than in the table above (Mac mode).
 
 ## If something goes wrong during the presentation
@@ -170,11 +199,12 @@ Stay calm: nothing here can damage the chain. The quick answers:
 |---|---|
 | The page shows a banner "The server does not answer" | Wait 10 s. If it stays: is the tunnel window still open? Reopen it. Check in the VM: `curl -s http://127.0.0.1:8088/health` |
 | Page shows "Indexer unreachable" (yellow banner) | Kupo stopped: `cd ~/cardano-seed-testnet/experiments/pipeline && ./kupo.sh start`; the page recovers by itself |
-| "Blockchain not reachable" in red, block number does not move | The chain stands still. Say so, run `./experiments/demo/demo.sh --step 0` in another window to see why. If it is dead (VM was paused): `./experiments/demo/demo.sh --step 6`, then `./experiments/demo/fresh.sh --yes` takes several minutes: show the **Details** tab or the architecture while you wait |
-| Sensors do not show up in step 2 | Batches come every 10 s, give it 30 s. Check `tail -20 /tmp/demo-logs/gwA.log` |
-| A step shows `FAIL` | Read the `hint:` line below it. The script goes on with the next step; you can repeat a single step with `./experiments/demo/demo.sh --step N` |
-| The tabs look empty / "No batches on the chain yet" | The chain is new and nothing was sent yet. Run step 2 and wait one minute |
-| "Readings stored permanently" stays at 0 | Normal in the first 5 minutes: batches turn final only 60 blocks (about 5 minutes) after they were written. Show **Trust** -> "Settling n / 60". Run the rehearsal before the presentation so that old batches are final |
+| "Blockchain not reachable" in red, block number does not move | The chain stands still. Say so, run `./experiments/demo/demo.sh --step 0` in another window to see why. If it is dead (VM was paused): `./experiments/demo/demo.sh --step 6`, then `./experiments/demo/fresh.sh --yes` takes several minutes: show the **Details** view or the architecture while you wait |
+| Sensors do not show up after `--prepare` | Batches come every 5 s, give it 30 s. Check `tail -20 /tmp/demo-logs/gwA.log` |
+| A step shows `FAIL` | Read the `hint:` line below it. The script goes on with the next step; you can repeat a single step with `./experiments/demo/demo.sh --step N`. `--prepare` that says the preflight found leftover processes: run `--step 6` first |
+| The live box on the page does not move | Look at the terminal: is `--show` still running? The box only follows `demo.sh`; the views still work by clicking the buttons |
+| The views look empty / "No batches on the chain yet" | The chain is new and nothing was sent yet. Run `--prepare` and wait one minute |
+| "Readings stored permanently" stays at 0 | Normal in the first 5 minutes: batches turn final only 60 blocks (about 5 minutes) after they were written. Show **Trust** -> "Settling n / 60". Run `--prepare` 5+ minutes before the talk so that the first batches are final |
 | You must stop at once | Ctrl-C in the demo window: it stops everything it started and repairs the registry list. Or `./experiments/demo/demo.sh --step 6` |
 
 ## What to do on a FAIL (details)
@@ -185,8 +215,8 @@ Stay calm: nothing here can damage the chain. The quick answers:
   After a new chain: `./kupo.sh wipe` first (`fresh.sh` does it).
 * **Page empty / "unknown signer":** check `curl -s http://127.0.0.1:8088/health`; the wallet addresses in
   `experiments/pipeline/gateways.json` must be those of the current gateways A and B (step 0 checks it; `fresh.sh` writes them).
-  Page slow after a long time: restart it (`--step 6`, then run again); it rebuilds from Kupo.
-* **"Approved gateways" shows "-" or the Trust tab says "The list could not be read from the chain":** the page could not read the registry coin.
+  Page slow after a long time: restart it (`--step 6`, then `--prepare` again); it rebuilds from Kupo.
+* **"Approved gateways" shows "-" or the Trust view says "The list could not be read from the chain":** the page could not read the registry coin.
   Check that `/tmp/p0n` exists in the pool-1 container (`fresh.sh` creates it) and that Kupo is caught up.
 * **Gateway stuck** (no `sent:` lines): `tail -20 /tmp/demo-logs/gwA.log`. "submit command exit 1" means the transaction could not be built or sent:
   usually the chain is slow or the wallet is empty. Batches that fail 5 times go to `dead/` and are NOT on the chain.
@@ -214,7 +244,7 @@ administrator + gateway keys and funding (`p0-admin.sh`), Aiken build and parame
 (`p0-registry.sh`), funds the wallets of A and B (`p1-fund.sh`), writes the new wallet addresses into `experiments/pipeline/gateways.json`, then runs the preflight.
 It was run for real, end to end, on 13 November 2026 (every step OK, preflight all PASS, the demo passed on the new chain).
 The local mode for the Ubuntu VM (`CHAIN_HOST=local`, the default on Linux) was run for real on 19 November 2026 on an Ubuntu 20.04 arm64 VM (2 CPUs, 4 GB RAM) as a new user:
-`fresh.sh --yes` 4 min 25 s with every step OK and the preflight all PASS, then `demo.sh --yes` all PASS (5 min 15 s). Not run on amd64. See [`docs/INSTALL.md`](../../docs/INSTALL.md).
+`fresh.sh --yes` 4 min 25 s with every step OK and the preflight all PASS, then `demo.sh --yes` (old flow) all PASS (5 min 15 s). Not run on amd64. See [`docs/INSTALL.md`](../../docs/INSTALL.md).
 
 ## Limits (to say honestly)
 
@@ -230,7 +260,7 @@ The local mode for the Ubuntu VM (`CHAIN_HOST=local`, the default on Linux) was 
   the revocation can still get into the same block. After the revoke, new batches are refused; their readings are lost
   (dead-letter) unless somebody re-sends them.
 * The "silent" alarm is on the server clock and only means "no new reading arrived from the chain for N s".
-  The demo uses 40 s to be quick; with the real batch time of 30 s use 90 or more (the server default).
+  The demo uses 30 s to be quick; with the real batch time of 30 s use 90 or more (the server default).
 * Private chain on one VM, simulated sensors, TCP lines instead of MQTT; the depth of old batches (from before the page server started) is an estimate.
 * "Final" here means 60 blocks (k) deep on this private chain with 3 pools; it is not the security of a public chain.
 * Each registry change costs a few hundred lovelace of the registry coin (about 5 ADA); thousands of changes are possible.

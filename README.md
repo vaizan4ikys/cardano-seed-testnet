@@ -52,7 +52,7 @@ A second, independent network (magic 43) runs next to the first: `NET=2 ./run.sh
 |---|---|
 | [`scripts/`](scripts/) | check the chain, send transactions and messages, leadership, partition test |
 | [`experiments/`](experiments/) | extra nodes joining a running network, measurements, load tests (list in its README) |
-| [`experiments/demo/`](experiments/demo/) | the leader demo: `fresh.sh` (new chain + contract + registry), `demo.sh` (rehearsal and presentation); presenter's guide |
+| [`experiments/demo/`](experiments/demo/) | the leader demo: `fresh.sh` (new chain + contract + registry), `demo.sh` (`--prepare` before the talk, `--show` in the talk, `--step 6` after; no option = rehearsal); presenter's guide |
 | [`experiments/pipeline/`](experiments/pipeline/) | simulated sensors, gateway, Kupo indexer script, page server and the web page (Sensors / Trust / Details) |
 | [`experiments/contract/`](experiments/contract/) | the gateway-registry smart contract (Aiken, Plutus V3), the scripts that deploy and test it, and the measured cost of it (`PHASE3-RESULTS.md`) |
 | [`experiments/multisite/`](experiments/multisite/) | real gateways at three sites (three more VMs), each with its own node, wallet and sensors, sending through the contract; needs three extra machines, not part of the demo |

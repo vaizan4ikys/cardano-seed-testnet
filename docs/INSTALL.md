@@ -13,9 +13,9 @@ steps have one part for each. Everything inside the VM (steps 6 to 16) is the sa
 * A web page (opened in your Windows browser) that reads the data back from the chain.
 
 **Time:** plan about 1 hour the first time (installing Ubuntu, the downloads, the build of the docker image; it depends on your internet speed).
-On our test VM (2 CPUs, 4 GB RAM, fast internet) the home-folder part of `install.sh` took about 1.5 minutes (plus the apt downloads), `fresh.sh --yes` 4.5 minutes and the rehearsal `demo.sh --yes` about 5 minutes
+On our test VM (2 CPUs, 4 GB RAM, fast internet) the home-folder part of `install.sh` took about 1.5 minutes (plus the apt downloads), `fresh.sh --yes` 4.5 minutes and the rehearsal `demo.sh` (the old flow with `--yes`) about 5 minutes
 (the build of the `seedemu-cardano` docker image from scratch was not part of that run: see "Tested on").
-Later runs (a new chain with `fresh.sh --yes`, then the demo) need about 5 minutes plus the demo.
+Later runs (a new chain with `fresh.sh --yes`, then the demo) need about 5 minutes plus the demo. The live part of the presentation (`demo.sh --show`) takes 1 to 2 minutes (measured on 19 November 2026 on an Ubuntu 20.04 arm64 VM (2 CPUs, 4 GB RAM), local mode: 1 min 48 s, 1 min 29 s and 1 min 6 s in three runs, all steps PASS (the time depends on when the next blocks come)).
 
 ## Words used in this guide
 
@@ -326,10 +326,12 @@ Fresh chain ready. Run the demo: /home/<user>/cardano-seed-testnet/experiments/d
 ### 16. Rehearsal: run the whole demo without pauses
 
 ```
-./experiments/demo/demo.sh --yes
+./experiments/demo/demo.sh
 ```
 
-*You should see:* the steps 0 to 6, each with `PASS` lines, and at the end a summary with `PASS` for every step (`step 6  PASS`). It took 5 minutes 15 seconds on the test VM (steps 0 to 6: 4, 1, 102, 29, 78, 71, 30 seconds).
+There are no pauses: nobody presses a key. (`--yes` is still accepted and means the same.)
+
+*You should see:* the steps 0 to 6, each with `PASS` lines, and at the end a summary with `PASS` for every step (`step 6  PASS`). With the old 6-step flow it took 5 minutes 15 seconds on the test VM (steps 0 to 6: 4, 1, 102, 29, 78, 71, 30 seconds); the new flow took 2 min 12 s (steps 0 to 6: 4, 26, 8, 25, 40, 4, 25 seconds, 19 November 2026).
 If a line says `FAIL`, it prints a `hint:` line below it; see the troubleshooting table.
 Everything the demo starts is stopped again at the end.
 
@@ -347,34 +349,53 @@ Open a **second** terminal window (keep it open during the whole demo) and run:
 
 *You should see:* a normal login, as in step 5. This window now forwards port 8088 of your computer to port 8088 of the VM.
 
-### 18. Start the demo and open the page
+### 18. Prepare the demo, open the page, then show it
 
-In your first terminal (in the VM) start the real demo:
+In your first terminal (in the VM), at least 5 minutes before the audience looks, prepare the demo:
 
 ```
 cd ~/cardano-seed-testnet
-./experiments/demo/demo.sh
+./experiments/demo/demo.sh --prepare
 ```
 
-It stops before every step with `[press Enter to start this step]`. After step 1 has started the page server, open
-<http://127.0.0.1:8088> in the browser of your PC or Mac. (Before that, the browser says that the connection was refused: normal.)
+It runs the preflight and starts the page server, gateway GW01 and its 10 sensors, and ends with `READY`. Everything keeps running.
+Then open <http://127.0.0.1:8088> in the browser of your PC or Mac. (Before `--prepare` has started the page server, the browser says that the connection was refused: normal.)
 
-*You should see:* the page "Sensor data on the blockchain" with the header "Sensors live / Readings stored permanently / Approved gateways"
-and three tabs: Sensors, Trust, Details. In step 2 sensor cards appear and the numbers move.
-What to click and what to say is in [`experiments/demo/README.md`](../experiments/demo/README.md).
+*You should see:* the page "Sensor data on the blockchain" with the header "Sensors live / Readings stored permanently / Approved gateways",
+three big buttons (Sensors, Trust, Details), the box "No demo running", gateway GW01 "Approved" and sensor cards with moving numbers ("Sensors live 10 of 10").
+Wait about 5 minutes: then the first batches are "Final" and "Readings stored permanently" shows a number.
+
+Now the live part of the presentation (about 1.5 to 2 minutes). Nobody presses a key:
+
+```
+./experiments/demo/demo.sh --show
+```
+
+*You should see:* the box "Live demo - step N of 4" with progress bars; the page switches between Trust and Sensors by itself: GW02 is refused, GW02 is approved, GW01 is revoked and its sensors turn Silent, GW01 is approved again.
+At the end the terminal prints `the live part took N s` and the box says "Live demo finished". Everything keeps running for questions; stop it with `./experiments/demo/demo.sh --step 6`.
+What to say is in [`experiments/demo/README.md`](../experiments/demo/README.md).
 In local mode `demo.sh` opens no tunnel and no browser; step 1 prints `>>> open http://127.0.0.1:8088 in the browser <<<` and the ssh commands for a tunnel.
 
 ## Presenting the demo
 
-Use [`experiments/demo/README.md`](../experiments/demo/README.md): what the demo proves, what to say and click in each step, timings, and what to do if something goes wrong.
-Before a presentation: run the rehearsal (step 16) at least 10 minutes earlier, so that the chain already holds batches that are "final".
+Use [`experiments/demo/README.md`](../experiments/demo/README.md): what the demo proves, what to say in each step, timings, and what to do if something goes wrong.
+The order is always the same:
 
-Useful commands:
+```
+./experiments/demo/demo.sh --prepare     # BEFORE the talk, 5+ minutes early: page, GW01 and 10 sensors; ends with READY
+./experiments/demo/demo.sh --show        # IN the talk: the 4 live steps (1.5 to 2 minutes), nobody presses a key
+./experiments/demo/demo.sh --step 6      # AFTER the talk: clean stop
+```
+
+The 5+ minutes matter: batches become "final" only about 5 minutes after they were written. Run the rehearsal (step 16) once the day before.
+
+Other useful commands:
 
 ```
 ./experiments/demo/demo.sh --step 0      # only the preflight: is everything ready?
-./experiments/demo/demo.sh --step 6      # clean stop of everything the demo started
 ```
+
+If `--prepare` says that the preflight found leftover processes, run `--step 6` first.
 
 ## Optional: three gateway sites on the same VM
 
@@ -394,7 +415,8 @@ Measured results of the 3-site tests (revoke one site, cut one site off the netw
 
 | You want to | Do |
 |---|---|
-| Stop the demo processes (page, gateways, sensors) | `./experiments/demo/demo.sh --step 6` |
+| Stop the demo processes (page, gateways, sensors; also after `--prepare` or `--show`) | `./experiments/demo/demo.sh --step 6` (the registry goes back to "GW01 approved, GW02 not") |
+| Start again for the next talk | `./experiments/demo/demo.sh --prepare`, 5+ minutes before, then `--show` in the talk |
 | Stop the whole chain (removes the containers) | `./stop.sh` |
 | Make a new chain with new demo data | `./experiments/demo/fresh.sh --yes` |
 
@@ -425,7 +447,7 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | `clock is not NTP-synced yet, wait and retry` | the VM clock is not synchronised | `sudo timedatectl set-ntp true`, wait 1 minute, `timedatectl` must show `System clock synchronized: yes` |
 | `fresh.sh` or the preflight says the page port 8088 is busy | an old page server or another program uses the port | `./experiments/demo/demo.sh --step 6`; find the owner with `ss -ltnp \| grep 8088`; or use another port: `PORT=8089 ./experiments/demo/demo.sh` (then use 8089 in the tunnel and in the browser) |
 | `bind [127.0.0.1]:8088: Address already in use` / `Could not request local forwarding` (Windows or Mac) | an old tunnel window or another program on your computer uses port 8088 | close the old ssh window; find the owner in PowerShell: `netstat -ano \| findstr :8088`; or use another local port: `ssh -p 2222 -L 8090:127.0.0.1:8088 <user>@127.0.0.1` and open <http://127.0.0.1:8090> |
-| Browser shows "connection refused" at 127.0.0.1:8088 | the tunnel is not open, or the page server is not running yet (before step 1 of the demo) | check the tunnel window (step 17) and that `demo.sh` is past step 1; in the VM: `curl -s http://127.0.0.1:8088/health` |
+| Browser shows "connection refused" at 127.0.0.1:8088 | the tunnel is not open, or the page server is not running yet (before step 1 of the demo) | check the tunnel window (step 17) and that `demo.sh --prepare` has finished (it prints `READY`); in the VM: `curl -s http://127.0.0.1:8088/health` |
 | `no space left on device`, or the check says the free disk is too low | VM disk too small | at least 10 GB free in the VM (`df -h /`); free space with `docker system prune` (only when the chain is stopped) or enlarge the VM disk |
 | Containers killed, `Cannot allocate memory`, VM freezes | not enough RAM | give the VM at least 4 GB (6 GB recommended), stop other programs on your computer |
 | `DeadlineExceeded` while building the image | too many parallel builds | `COMPOSE_PARALLEL_LIMIT=2 ./experiments/demo/fresh.sh --yes` |
@@ -455,8 +477,8 @@ the answer `y` and a full `fresh.sh` with the fix are the next test.
 | `install.sh --check`, then `install.sh` (home-folder part) | 40 s, `ALL PASS` |
 | Step 14 (`fresh.sh --dry-run`) | no changes, steps 0 to 10 listed |
 | Step 15 (`fresh.sh --yes`) | 4 min 25 s, preflight all `PASS`; a second run 4 min 28 s |
-| Step 16 (`demo.sh --yes`) | 5 min 15 s, steps 0 to 6 all `PASS` |
-| Step 18, page through a tunnel | `http://127.0.0.1:8089` -> VM port 8088: HTTP 200, `/api/state` shows `registry known=true` |
+| Step 16 (`demo.sh --yes`, old 6-step flow) | 5 min 15 s, steps 0 to 6 all `PASS` (new flow, same day: `--prepare` 25-60 s, `--show` 1 min 6 s to 1 min 48 s in three runs, `--step 6` 14-44 s, the full rehearsal all `PASS`) |
+| Step 18, page through a tunnel (old flow) | `http://127.0.0.1:8089` -> VM port 8088: HTTP 200, `/api/state` shows `registry known=true` |
 
 Not tested (be careful, report problems with the step number and the output):
 

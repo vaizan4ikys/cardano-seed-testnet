@@ -29,10 +29,29 @@
   .conn { margin-left: auto; font-size: 13px; color: var(--muted); }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--bar); margin-right: 6px; }
   .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
-  nav { display: flex; gap: 4px; margin-top: 10px; }
-  nav button { font: inherit; font-weight: 600; background: none; border: 0; border-bottom: 3px solid transparent; padding: 8px 14px;
-               color: var(--muted); cursor: pointer; }
-  nav button.on { color: var(--accent); border-bottom-color: var(--accent); }
+  /* second header row: three big view buttons on the left, the phase of the live demo on the right */
+  .row2 { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px 0; }
+  nav { display: flex; gap: 10px; }
+  nav button { font: inherit; font-size: 17px; font-weight: 650; min-width: 132px; padding: 12px 22px; border-radius: 10px;
+               background: var(--bg); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+  nav button:hover { border-color: var(--accent); }
+  nav button.on { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  nav button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .phase { flex: 0 1 560px; min-height: 64px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px;
+           background: var(--bg); display: flex; flex-direction: column; justify-content: center; }
+  .phase.live { background: var(--info-bg); border-color: var(--accent); }
+  .phase .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex;
+                  align-items: center; gap: 8px; }
+  .phase .label .live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bar); }
+  .phase.live .label .live-dot { background: var(--bad); animation: blink 1.2s ease-in-out infinite; }
+  .phase .steps { display: inline-flex; gap: 4px; margin-left: 6px; }
+  .phase .steps i { width: 22px; height: 6px; border-radius: 3px; background: var(--bar); }
+  .phase .steps i.done { background: var(--ok); } .phase .steps i.cur { background: var(--accent); }
+  .phase .title { font-size: 17px; font-weight: 650; margin-top: 2px; }
+  .phase .detail { font-size: 14px; color: var(--muted); }
+  @keyframes blink { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .phase.live .label .live-dot { animation: none; } }
+  @media (max-width: 760px) { nav button { min-width: 0; flex: 1; padding: 10px 8px; } .phase { flex-basis: 100%; } }
   main { max-width: 1280px; margin: 0 auto; padding: 16px 20px 40px; }
   .tab { display: none; } .tab.on { display: block; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; padding: 14px 16px; }
@@ -104,11 +123,18 @@
     <div class="kpi"><small>Approved gateways</small><b id="k-gw">-</b></div>
     <div class="conn" id="conn">-</div>
   </div>
-  <nav>
-    <button data-tab="sensors" class="on">Sensors</button>
-    <button data-tab="trust">Trust</button>
-    <button data-tab="details">Details</button>
-  </nav>
+  <div class="row2">
+    <nav aria-label="Views">
+      <button data-tab="sensors" class="on">Sensors</button>
+      <button data-tab="trust">Trust</button>
+      <button data-tab="details">Details</button>
+    </nav>
+    <div class="phase" id="phase" aria-live="polite">
+      <div class="label"><span class="live-dot"></span><span id="phase-label">Live demo</span><span class="steps" id="phase-steps"></span></div>
+      <div class="title" id="phase-title">No demo running</div>
+      <div class="detail" id="phase-detail">The page shows the chain as it is.</div>
+    </div>
+  </div>
 </header>
 <div id="banner" class="banner"></div>
 
@@ -184,6 +210,7 @@
   var selected = null;       // key of the selected sensor: "sensor|kind" (can be given in the address as #AGRI_001|temperature)
   try { if (location.hash.length > 1) selected = decodeURIComponent(location.hash.slice(1)); } catch (e) { selected = null; }
   var last = null, failed = false, openTx = {}, tab = "sensors";
+  var demoTabKey = "";       // step and tab of the live demo that the page last switched to (switch only on a change)
   try { var q = /[?&]tab=(sensors|trust|details)/.exec(location.search); if (q) tab = q[1]; } catch (e) {}
 
   function $(id) { return document.getElementById(id); }
@@ -289,7 +316,7 @@
     });
     $("gw-trust").innerHTML = rows.length ? rows.join("") : "<tr><td colspan=\"5\" class=\"empty\">No gateways known.</td></tr>";
     var r = s.registry || {};
-    $("reginfo").textContent = r.known ? "The list on the chain has " + r.size + " entries (read " + dur(r.age) + " ago)." :
+    $("reginfo").textContent = r.known ? "The list on the chain has " + r.size + (r.size === 1 ? " entry" : " entries") + " (read " + dur(r.age) + " ago)." :
       "The list could not be read from the chain" + (r.error ? " (" + r.error + ")" : "") + ".";
     var c = s.counts, settling = c.batches - c.final - c.rolled_back;
     $("t-final").textContent = c.final; $("t-settling").textContent = settling; $("t-back").textContent = c.rolled_back;
@@ -445,8 +472,35 @@
   $("chart").addEventListener("touchend", hoverEnd);
   window.addEventListener("resize", function () { if (last && !hovering) renderChart(last); });
 
+  // ------------------------------------------------------------------ live demo phase (posted by demo.sh)
+  function renderPhase(s) {
+    var d = s.demo, box = $("phase"), dots = "";
+    // "finished" stays 2 minutes; any other state 10 minutes (demo.sh was stopped, or "--step N --keep" left it)
+    var shown = d && !(d.state === "finished" && d.age > 120) && d.age < 600;
+    if (!shown) {
+      demoTabKey = "";       // the next demo step switches the view again, even if it is the same step as before
+      box.className = "phase";
+      $("phase-label").textContent = "Live demo"; $("phase-steps").innerHTML = "";
+      $("phase-title").textContent = "No demo running"; $("phase-detail").textContent = "The page shows the chain as it is.";
+      return;
+    }
+    for (var i = 1; i <= d.total; i++) {
+      var done = i < d.step || (i === d.step && d.state !== "running") || d.state === "finished";
+      dots += "<i class=\"" + (done ? "done" : i === d.step ? "cur" : "") + "\" title=\"" + esc(d.steps[i - 1] || "") + "\"></i>";
+    }
+    box.className = "phase" + (d.state === "finished" ? "" : " live");
+    $("phase-label").textContent = d.state === "finished" ? "Live demo finished" : "Live demo · step " + d.step + " of " + d.total;
+    $("phase-steps").innerHTML = dots;
+    $("phase-title").textContent = d.title;
+    $("phase-detail").textContent = d.detail;
+    var key = d.step + ":" + d.tab;
+    // the demo step names the view to look at: switch once per change (a click by the presenter is not undone)
+    if (d.tab && key !== demoTabKey) { demoTabKey = key; if (d.tab !== tab) showTab(d.tab, true); }
+  }
+
   function render(s) {
     renderTop(s);
+    renderPhase(s);
     if (tab === "sensors") { renderSensors(s); renderChart(s); }
     else if (tab === "trust") renderTrust(s);
     else renderDetails(s);
@@ -456,11 +510,12 @@
     else b.className = "banner";
   }
 
-  function showTab(t) {
+  // showTab(t, noRender): show view t; noRender when called from inside render (it is drawing already)
+  function showTab(t, noRender) {
     tab = t;
     ["sensors", "trust", "details"].forEach(function (n) { $("tab-" + n).className = "tab" + (n === t ? " on" : ""); });
     Array.prototype.forEach.call(document.querySelectorAll("nav button"), function (b) { b.className = b.getAttribute("data-tab") === t ? "on" : ""; });
-    if (last) render(last);
+    if (last && !noRender) render(last);
   }
   document.querySelector("nav").addEventListener("click", function (e) {
     var b = e.target.closest("button"); if (b) showTab(b.getAttribute("data-tab"));
