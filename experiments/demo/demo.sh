@@ -219,6 +219,7 @@ start_gateway() {
   gw_cmd="env GATEWAY=$g python3 -u gateway.py --B $B --T $T --listen-port $port"
   gw_cmd="$gw_cmd --outbox $RUN/outbox$g --gateway-id $id"
   gw_cmd="$gw_cmd --submit command --submit-command './submit_contract.sh {file} {hash}' --retry 5"
+  gw_cmd="$gw_cmd --kupo $KUPO_URL --final-blocks 60"   # follow each batch until final
   vmx start gw$g $VPIPE "$gw_cmd" | tail -1
 }
 

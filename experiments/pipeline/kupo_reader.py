@@ -3,6 +3,7 @@
 Kupo follows the chain and keeps what it sees; we ask it two things:
   /matches?created_after=<slot>&order=oldest_first   which transactions are new (slot and transaction id)
   /metadata/<slot>?transaction_id=<id>                the metadata of one transaction
+  /matches/*@<id>                                     where one transaction is (its outputs, spent ones too)
 
 Kupo shows metadata as typed JSON ({"int": 5}, {"string": "x"}, {"list": [...]}, {"map": [...]}).
 schema_to_plain turns it back into plain JSON, and batch_from_metadata rebuilds the exact bytes of the
@@ -10,6 +11,9 @@ batch file, so the page can check the batch hash (sha256 of those bytes).
 
 Recent blocks can still change (a rollback). Kupo sends the header hash of the block with every metadata
 answer (the X-Block-Header-Hash header); keep it, and show a batch as final only when it is k blocks deep.
+
+Kupo is started WITHOUT --prune-utxo (kupo.sh), so an output that is spent stays listed. The gateway (confirm.py)
+and check_batches.py rely on that to find a transaction whose change output has been spent already.
 
 Used by reader.py (KupoClient adds /health and the raw match list). Reads from the network only, writes nothing.
 """
@@ -83,3 +87,12 @@ class Kupo:
             if obj is not None:
                 return obj, h, header
         return None, None, header
+
+    def find_transaction(self, txid: str) -> Optional[Tuple[int, Optional[str]]]:
+        """(slot, block header hash) of the block that holds this transaction, or None if Kupo does not list it.
+        Asks for every output of the transaction (/matches/*@txid); spent outputs are listed too."""
+        matches, _ = self._get("/matches/*@" + txid)
+        if not matches:
+            return None
+        at = matches[0]["created_at"]
+        return at["slot_no"], at.get("header_hash")

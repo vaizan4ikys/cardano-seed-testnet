@@ -6,6 +6,8 @@ back through Kupo, and `page.html` shows it. The whole thing is started and show
 
 * [The layout of the data](#cardano-metadata-rules-that-shape-the-layout) a gateway writes into one transaction, and how big it is.
   Code: `layout.py` (layout, hash, size rules), `calc_size.py` (the size table below).
+* [The gateway](#the-gateway-from-sent-to-final): how it keeps every batch until it is final; `check_batches.py` checks an
+  outbox against the chain.
 * [The web page](#the-web-page) and its server.
 
 ## Cardano metadata rules that shape the layout
@@ -110,6 +112,65 @@ reading. The price of a bigger B is a longer batch-fill wait (B divided by the r
 site). B=100 is also the value of the earlier load tests, so the results stay comparable. The gateway splits a batch
 automatically if the estimate ever exceeds the limit.
 
+## The gateway: from "sent" to "final"
+
+`gateway.py` writes the batch files and sends them (`--submit command`, normally `submit_contract.sh`). A batch is
+critical sensor data, so the gateway does not stop at "the transaction was in a block once":
+
+* **Why.** A block can be replaced by a competing block (two pools make a block for the same slot; on the lab chain about
+  1 block in 9, seen in the node logs). Cardano does **not** put the transactions of a replaced block back into the mempool.
+  The submit command returns 0 as soon as the transaction is in a block, so without more care the batch (about 100
+  readings) would be lost and nobody would notice.
+* **What the gateway does** (needs `--kupo URL`; `demo.sh` passes it). It keeps the transaction id of every submitted batch
+  (the last 64-hex word of the last output line of the submit command), writes it into `batch-....json.tx` and sets the
+  status to **settling**. Every `--confirm-interval` seconds (15) it asks Kupo about each settling batch:
+  in a block: how many blocks are on top; at `--final-blocks` (60 = k) the status becomes **final**.
+  Not listed by Kupo for longer than `--missing-grace` seconds (60; Kupo is normally less than a second behind the node):
+  the block was replaced. The gateway logs `batch X: its transaction is no longer in the chain (block replaced): sending it
+  again` and submits the **same file** again (same hash); `p1-batch.sh` sees that the old transaction is neither in the
+  chain nor in the mempool and builds a new one. Batches are sent again **oldest first** (each one spends the coin of the one before).
+  A resend that the contract refuses for good (exit 2, for example the gateway was revoked meanwhile) goes to `dead/` like a first submit.
+* **Same method as the page.** Kupo gives the slot of the transaction (`/matches/*@<txid>`), the node gives the tip block
+  (`reader.DockerTip`), and the block of a transaction is the tip block when it was first seen (`reader.first_seen_block`,
+  an estimate from the slots when it was seen late). Depth = tip block - block + 1, like "Settling n/60" on the page.
+* **Kupo must keep spent outputs.** The change output of a batch transaction is spent by the next batch, so a Kupo that
+  pruned spent outputs would make old batches look missing. `kupo.sh` starts Kupo with `--match '*'` and without
+  `--prune-utxo`, so they stay (the page and `p1-batch.sh` rely on the same). As a safety net the gateway asks for the
+  metadata of the slot where it saw the transaction before (Kupo keeps it) and logs a warning if that works while the outputs are missing.
+* **No false alarm when Kupo or the node is the problem.** If Kupo does not answer, is not connected to the node, is more than
+  30 slots behind, or the tip cannot be read, the round is skipped and logged once; nothing is concluded from it.
+* **Status files** (next to `batch-NNNNNN-<hash>.json`):
+
+  | `.status` | meaning |
+  |---|---|
+  | `pending` / `pending <n>` | not sent yet / failed n times (after `--max-tries` it goes to `dead/`) |
+  | `settling` | submitted; the transaction is in the `.tx` file; followed until final |
+  | `final` | final, nothing more to do |
+  | `sent` | submitted but not followed: dry mode, no `--kupo`, no transaction id in the output, or an outbox of the old gateway |
+
+  The `.tx` file is JSON: `txid`, `slot`, `header` (block header hash), `block` (tip block when first seen), `resends`, `failed`
+  (resends that failed in a row). A restart keeps all of this: the settling batches are followed on.
+* **Log lines:** `sent: FILE (transaction ...)`, `final: FILE (transaction ..., 60 blocks deep)`, `batch X: its transaction is no
+  longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)`.
+* **Options:** `--kupo URL` (default `$KUPO_URL`; without it nothing is followed and a warning is logged), `--final-blocks 60`,
+  `--confirm-interval 15`, `--missing-grace 60`, `--container` and `--magic` (for the node tip, as in `server.py`).
+
+### Did every batch reach the chain? `check_batches.py`
+
+```
+python3 check_batches.py --outbox /tmp/demo-run-XXXX/outboxA --kupo http://10.150.0.71:1442 [--gateway-id GW01] [--list]
+```
+
+Counts the batch files of an outbox: **final**, **settling** (in the chain, fewer than 60 blocks on top), **pending**
+(never sent), **dead** and **LOST** (the gateway says sent, but the batch is not in the chain), with the number of readings
+of each group. Exit code 1 if something is LOST. It also works on an outbox of the **old** gateway, which stored no transaction
+id: a batch is found on the chain by its transaction id (new gateway), else by its hash (it is in the file name), else by
+content: every reading (gateway id, sensor id, sequence number) of the file is in some batch on the chain. The depth is
+the gateway's own record when there is one, else the page's estimate from the node tip and the slots (the node tip comes from `docker exec`;
+without docker, from Kupo's slot, then settling/final is only approximate).
+
+Tests: `python3 -m unittest -v` in this folder (`test_confirm.py` covers the following of batches and the checker with a fake Kupo, tip and submit step).
+
 ## The web page
 
 `server.py` serves `page.html` and the data as JSON. It keeps everything in memory and rebuilds it from Kupo at start (no database of its own).
@@ -123,21 +184,21 @@ The server listens on `127.0.0.1` only (no login, no TLS): reach it from another
 (`ssh -L 8088:127.0.0.1:8088 <user>@<vm>`), then open <http://127.0.0.1:8088>. `GET /api/state` gives the data, `GET /health` a short status.
 In normal use `../demo/demo.sh` starts it with the right options.
 
-The page has a header and three tabs:
+The page has a header and three big view buttons, **Sensors**, **Trust** and **Details**; a button switches what is shown under the header:
 
 * **Header:** *Sensors live* (sensors that are not silent, out of all seen), *Readings stored permanently* (readings in batches that are final), *Approved gateways*
   (named gateways that are on the registry list, out of the named gateways), and the connection to the chain with the tip block.
-* **Sensors:** one card per sensor and kind, grouped by gateway; the gateway has an Approved / Not approved badge. A card shows the latest value, a small curve and
+* **Sensors (button):** one card per sensor and kind, grouped by gateway; the gateway has an Approved / Not approved badge. A card shows the latest value, a small curve and
   **Live**, **Silent** or **Out of range**. Click a card for a graph with lowest, average and highest value and the value under the mouse.
-* **Trust:** *Who may send data?* is a table of the gateways with Approved / Not approved, batches and readings stored, time of the last data.
+* **Trust (button):** *Who may send data?* is a table of the gateways with Approved / Not approved, batches and readings stored, time of the last data.
   *Is the stored data safe?* counts batches that are final, settling (in a block, fewer than `--final-depth` blocks on top) and rolled back, and lists the latest batches.
   The **Verify** button of a batch shows the transaction id, the block and depth, the fingerprint of the data (the batch hash from above), the signer and what this proves.
-* **Details:** chain tip, Kupo status, server time, counts, size of the registry list; technical tables of the latest batches (depth bars, warnings such as "identity mismatch") and of the gateways (addresses, receipts).
+* **Details (button):** chain tip, Kupo status, server time, counts, size of the registry list; technical tables of the latest batches (depth bars, warnings such as "identity mismatch") and of the gateways (addresses, receipts).
 
 **Approved or not is read from the chain.** The registry (the list of approved gateway keys) is one coin at the administrator address that holds the registry token, with the list as its inline datum.
 The server finds that coin through Kupo (`/matches/<admin address>?unspent`, then `/datums/<hash>`), turns the list into key hashes and compares them with the key hash of each
 gateway's wallet address (`reader.Registry`). So the page shows a revoke or an enrol a few seconds after the transaction is in a block. If the list cannot be read, the badge says
-"list unknown" and the Trust tab shows the error.
+"list unknown" and the Trust view shows the error.
 
 The server option `--registry-dir DIR` (default `/tmp/p0n`) is the directory **inside pool 1's container** with `admin.addr`, `policy.id` and `token.hex`
 (they are written by `../contract/in-container/p0-admin.sh` and `p0-registry.sh`; the server reads them with `docker exec`). `--registry-dir none` switches the registry reading off:
