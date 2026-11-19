@@ -17,7 +17,7 @@ The rest of this file is about the chain itself.
 
 ## Requirements
 
-* Linux machine or VM (Ubuntu 22.04 recommended, amd64 or arm64; 20.04 also works; **not 24.04**: its Python 3.12 is too new for SEED's pinned packages) with at least 2 CPUs, 4 GB RAM and 30 GB disk (15 GB free)
+* Linux machine or VM (Ubuntu 22.04 recommended, amd64 or arm64; 20.04 also works; **not 24.04**: its Python 3.12 is too new for SEED's pinned packages) with at least 2 CPUs, 4 GB RAM and 30 GB disk (10 GB free)
 * Docker Engine with the Compose v2 plugin (Ubuntu packages `docker.io` and `docker-compose-v2`), usable without `sudo`
 * an NTP-synced clock (`timedatectl` shows `System clock synchronized: yes`; the chain takes its time from it)
 * `git`, `python3`, `python3-venv`, `python3-dev`, `build-essential`, `curl`, `jq`, `openssl`, `rsync`

@@ -41,7 +41,7 @@ If it says "Disabled", switch it on in the BIOS/UEFI (the key at power-on differ
 Downloads. What was measured on the test VM: the SEED clone 400 MB on disk, its Python packages 70 MB, Aiken 14 MB, Kupo 54 MB (273 MB unpacked),
 the SEED router and map images about 1.1 GB on disk (pulled by the first `fresh.sh`).
 Not measured (plan for them): the Ubuntu ISO (about 2 GB), the apt packages for Docker and Python (about 150-250 MB), the base image `handsonsecurity/seedemu-multiarch-base` and the `cardano-node` image
-from ghcr.io that our image is built from. So "about 5 GB in total" is an estimate. `install.sh` checks for 15 GB of free disk.
+from ghcr.io that our image is built from. So "about 5 GB in total" is an estimate. `install.sh` checks for 10 GB of free disk (everything together used about 5.2 GB on the test VM).
 
 ## Part A. Create the VM
 
@@ -91,7 +91,7 @@ Start the VM and go through the Ubuntu installer. Keep the defaults, except:
 * Type of install: **Ubuntu Server** (not "minimized").
 * Storage: use the whole disk (the default). **Then check the summary screen** ("Storage configuration"): with the
   default LVM layout Ubuntu gives the system (`ubuntu-lv`, mounted at `/`) only part of the disk, for example 10 GB of 20 GB,
-  and the demo needs about 15 GB free. Select `ubuntu-lv` -> Edit -> set Size to the maximum shown -> Save.
+  and the demo needs about 10 GB free. Select `ubuntu-lv` -> Edit -> set Size to the maximum shown -> Save.
   (Forgot it? After the install, one command gives `/` the rest of the disk:
   `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`; `df -h /` then shows the bigger size.)
 * Your name, server name, **user name** and password: choose them and write them down. Below `<user>` means your user name.
@@ -199,7 +199,7 @@ cd ~/cardano-seed-testnet
 ```
 
 *You should see:* one `PASS` line per item (Linux, docker, docker compose, python3, git, curl, jq, openssl, rsync, seed-emulator,
-free disk at least 15 GB, RAM at least 3.5 GB, repository folder, Aiken, Kupo) and at the end `ALL PASS`.
+free disk at least 10 GB, RAM at least 3.5 GB, repository folder, Aiken, Kupo) and at the end `ALL PASS`.
 For every `FAIL` the script prints a hint; `./install.sh` (without `--check`) installs what it can.
 On an amd64 PC the Aiken folder is `aiken-x86_64-unknown-linux-musl` (not tested).
 
@@ -239,7 +239,7 @@ docker compose version
 
 *You should see:* "Hello from Docker!" and a line like `Docker Compose version v2.x.x`.
 
-### 12. Disk (only if `./install.sh --check` says `free disk ... needed: 15 GB`)
+### 12. Disk (only if `./install.sh --check` says `free disk ... needed: 10 GB`)
 
 If the hint says that Ubuntu's installer left part of the disk unused, give it to `/`:
 
@@ -396,13 +396,14 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | `ModuleNotFoundError: No module named 'seedemu'` | the clone of the SEED Emulator is not in `~/seed-emulator` (the scripts set `PYTHONPATH` themselves) | `./install.sh` clones it (step 8), or set the folder: `export SEED_EMULATOR=<folder>`; `./install.sh --check` shows what is missing |
 | `ModuleNotFoundError: No module named 'web3'` (or `yaml`, `eth_account`, `requests`, `urllib3`, `pkg_resources`, `parsimonious`) | the Python packages of SEED are missing, or you run a different Python than `~/seed-venv`, or you use Ubuntu 24.04 (its Python 3.12 is too new for the pinned packages, see step 2) | `./install.sh` creates `~/seed-venv`; if `~/seed-venv` is broken, delete it (`rm -rf ~/seed-venv`) and run the script again; on 24.04 install Ubuntu 22.04 instead |
 | `sudo apt update`: `The repository 'file:/cdrom ... Release' no longer has a Release file` | the Ubuntu installer added the install ISO ("cdrom") as a package source; the ISO is not attached any more | `sudo sed -i '/cdrom/s/^deb/# deb/' /etc/apt/sources.list`, then `sudo apt update` again. If `apt install` then says `Unable to locate package`, the installer had no internet and wrote no online sources: check `grep -v '^#' /etc/apt/sources.list` |
-| `install.sh --check`: `free disk: ... needed: 15 GB`, although the VM disk is big enough | Ubuntu's installer gave `/` only part of the disk (default LVM layout; `lsblk` shows `ubuntu--vg-ubuntu--lv` smaller than its partition) | `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`, then `df -h /` |
+| `install.sh --check`: `free disk: ... needed: 10 GB`, although the VM disk is big enough | Ubuntu's installer gave `/` only part of the disk (default LVM layout; `lsblk` shows `ubuntu--vg-ubuntu--lv` smaller than its partition) | `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`, then `df -h /` |
 | `fresh.sh` stops with `container files: STILL wrong in: ...` | older version of this repository: the legacy docker builder put files of one container into another container's image | `git pull`, then run `fresh.sh` again (since 19 Nov 2026 `run.sh` prevents it) |
+| `pip install failed` ... `No matching distribution found for jsonschema-specifications==2024.10.1`, or `seed-emulator ... is at another version` | `~/seed-emulator` was cloned without `--branch v1.1` (the newest SEED needs Python 3.9 or newer) | `./install.sh` switches the clone to v1.1 and creates `~/seed-venv`; by hand: `git -C ~/seed-emulator checkout v1.1`, then `./install.sh` |
 | `clock is not NTP-synced yet, wait and retry` | the VM clock is not synchronised | `sudo timedatectl set-ntp true`, wait 1 minute, `timedatectl` must show `System clock synchronized: yes` |
 | `fresh.sh` or the preflight says the page port 8088 is busy | an old page server or another program uses the port | `./experiments/demo/demo.sh --step 6`; find the owner with `ss -ltnp \| grep 8088`; or use another port: `PORT=8089 ./experiments/demo/demo.sh` (then use 8089 in the tunnel and in the browser) |
 | Windows: `bind [127.0.0.1]:8088: Address already in use` / `Could not request local forwarding` | an old tunnel window or another program on Windows uses port 8088 | close the old ssh window; find the owner in PowerShell: `netstat -ano \| findstr :8088`; or use another local port: `ssh -p 2222 -L 8090:127.0.0.1:8088 <user>@127.0.0.1` and open <http://127.0.0.1:8090> |
 | Browser shows "connection refused" at 127.0.0.1:8088 | the tunnel is not open, or the page server is not running yet (before step 1 of the demo) | check the tunnel window (step 17) and that `demo.sh` is past step 1; in the VM: `curl -s http://127.0.0.1:8088/health` |
-| `no space left on device`, or the check says the free disk is too low | VM disk too small | at least 15 GB free in the VM (`df -h /`); free space with `docker system prune` (only when the chain is stopped) or enlarge the VM disk |
+| `no space left on device`, or the check says the free disk is too low | VM disk too small | at least 10 GB free in the VM (`df -h /`); free space with `docker system prune` (only when the chain is stopped) or enlarge the VM disk |
 | Containers killed, `Cannot allocate memory`, VM freezes | not enough RAM | give the VM at least 4 GB (6 GB recommended), stop other programs on Windows |
 | `DeadlineExceeded` while building the image | too many parallel builds | `COMPOSE_PARALLEL_LIMIT=2 ./experiments/demo/fresh.sh --yes` |
 | `fresh.sh` fails at the Aiken step ("aiken step failed") | Aiken missing or wrong CPU type in `~/tools`, or no access to github.com (the Aiken standard library is downloaded on the first build) | run `./install.sh` again; test `curl -sI https://github.com \| head -1`; then run `fresh.sh --yes` again |

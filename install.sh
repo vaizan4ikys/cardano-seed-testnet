@@ -45,6 +45,7 @@ SUDO_CMDS=()    # other system steps that need sudo ...
 SUDO_WHY=()     # ... and why each one is needed
 NEED_VENV=0     # 1: ~/seed-venv has to be created
 RELOGIN=0       # 1: the user is in the group docker, but this login started before that
+SEED_OTHER=0    # 1: the SEED clone is at another version than the tested release $SEED_TAG
 
 # ---- output helpers: one line per check ----
 # pass TEXT / fail TEXT / hint TEXT: print one result line (fail also counts the failure)
@@ -149,6 +150,7 @@ check_programs() {
 check_seed() {
   local py pkg head_now
   py=$(seed_python)
+  head_now=$(git -C "$SEED_EMULATOR" rev-parse HEAD 2> /dev/null)   # empty when the folder is not a git clone
   if [ ! -d "$SEED_EMULATOR/seedemu" ]; then
     fail "seed-emulator is not cloned (no $SEED_EMULATOR/seedemu)"
     if [ $CHECK_ONLY = 1 ]; then
@@ -156,13 +158,18 @@ check_seed() {
            "$SEED_EMULATOR"
     else hint "it is cloned below"; fi
     NEED_VENV=1
+  elif [ -n "$head_now" ] && [ "$head_now" != "$SEED_COMMIT" ]; then
+    # another version (for example a plain "git clone" gives the newest one): its requirements.txt can need a newer
+    # Python (the newest SEED does not install on Ubuntu 20.04), and the demo was only tested with $SEED_TAG
+    SEED_OTHER=1
+    fail "seed-emulator in $SEED_EMULATOR is at another version" \
+         "($(git -C "$SEED_EMULATOR" describe --tags 2> /dev/null || echo "${head_now:0:7}"))," \
+         "the demo needs release $SEED_TAG"
+    if [ $CHECK_ONLY = 1 ]; then hint "./install.sh switches it, or: git -C $SEED_EMULATOR checkout $SEED_TAG"
+    else hint "it is switched to $SEED_TAG below"; fi
+    return
   elif command -v "$py" > /dev/null 2>&1 && PYTHONPATH=$SEED_EMULATOR "$py" -c 'import seedemu' > /dev/null 2>&1; then
-    pass "seed-emulator can be imported (from $SEED_EMULATOR, Python: $py)"
-    head_now=$(git -C "$SEED_EMULATOR" rev-parse HEAD 2> /dev/null)
-    if [ -n "$head_now" ] && [ "$head_now" != "$SEED_COMMIT" ]; then
-      echo "        note: seed-emulator is at commit ${head_now:0:7}, the tested one is ${SEED_COMMIT:0:7}" \
-           "(release $SEED_TAG): git -C $SEED_EMULATOR checkout $SEED_TAG"
-    fi
+    pass "seed-emulator $SEED_TAG can be imported (from $SEED_EMULATOR, Python: $py)"
     return
   elif [ -z "${SEED_PYTHON:-}" ] && [ ! -x "$HOME/seed-venv/bin/python3" ]; then
     fail "seed-emulator cannot be imported yet (its Python packages are not installed)"
@@ -193,14 +200,15 @@ lvm_unused_gb() {
   echo $(( (below_bytes - lv_bytes) / 1073741824 ))
 }
 
-# check_disk_and_ram: at least 15 GB free in the home folder and 3.5 GB of memory
+# check_disk_and_ram: at least 10 GB free in the home folder and 3.5 GB of memory. Measured on a test VM: SEED, its
+# Python packages, Aiken, Kupo and the docker images use about 5.2 GB together; the rest is room for the chain and logs.
 check_disk_and_ram() {
   local disk unused memkb
   disk=$(df -BG --output=avail "$HOME" 2>/dev/null | tail -1 | tr -dc 0-9)
-  if [ "${disk:-0}" -ge 15 ]; then
-    pass "free disk: $disk GB (needed: 15 GB)"
+  if [ "${disk:-0}" -ge 10 ]; then
+    pass "free disk: $disk GB (needed: 10 GB)"
   else
-    fail "free disk: ${disk:-?} GB, needed: 15 GB"
+    fail "free disk: ${disk:-?} GB, needed: 10 GB"
     unused=$(lvm_unused_gb)
     if [ "$unused" -ge 1 ]; then
       hint "Ubuntu's installer left $unused GB of the disk unused; one command gives them to /"
@@ -262,7 +270,7 @@ check_tools() {
 
 # run_checks: all checks, from scratch
 run_checks() {
-  FAILS=0; APT=""; SUDO_CMDS=(); SUDO_WHY=(); NEED_VENV=0; RELOGIN=0
+  FAILS=0; APT=""; SUDO_CMDS=(); SUDO_WHY=(); NEED_VENV=0; RELOGIN=0; SEED_OTHER=0
   pass "Linux ($(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-Linux}"))"
   check_docker
   check_programs
@@ -327,6 +335,23 @@ clone_seed() {
     echo "  SEED Emulator ready (commit ${SEED_COMMIT:0:7})"
   else
     echo "  git clone failed (does this machine reach github.com?)"
+    return 1
+  fi
+}
+
+# switch_seed: put an existing SEED clone on the tested release (only when it has no local changes)
+switch_seed() {
+  if [ -n "$(git -C "$SEED_EMULATOR" status --porcelain 2> /dev/null)" ]; then
+    echo "  $SEED_EMULATOR has local changes: not switched. Do it yourself: git -C $SEED_EMULATOR checkout $SEED_TAG"
+    return 1
+  fi
+  echo "  switching the SEED Emulator in $SEED_EMULATOR to release $SEED_TAG ..."
+  git -C "$SEED_EMULATOR" fetch --quiet --tags 2> /dev/null          # an old clone may not know the tag yet
+  if git -C "$SEED_EMULATOR" -c advice.detachedHead=false checkout --quiet "$SEED_TAG" 2> /dev/null \
+     && [ "$(git -C "$SEED_EMULATOR" rev-parse HEAD)" = "$SEED_COMMIT" ]; then
+    echo "  SEED Emulator ready (release $SEED_TAG, commit ${SEED_COMMIT:0:7})"
+  else
+    echo "  could not switch to $SEED_TAG: git -C $SEED_EMULATOR checkout $SEED_TAG"
     return 1
   fi
 }
@@ -450,6 +475,9 @@ install_home_steps() {
       echo "  git is needed to clone the SEED Emulator (system steps above)"
     fi
     run_checks > /dev/null          # NEED_VENV now refers to the new clone
+  elif [ $SEED_OTHER = 1 ]; then
+    switch_seed || echo "  SEED Emulator NOT switched"
+    run_checks > /dev/null          # NEED_VENV now refers to release $SEED_TAG
   fi
   # Aiken, Kupo and the Aiken standard library
   if [ "$TOOLS_ARCH" = unknown ]; then
