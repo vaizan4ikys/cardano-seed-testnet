@@ -67,8 +67,7 @@ Download the ISO "Ubuntu Server 22.04 LTS" (22.04.x, `...-live-server-amd64.iso`
 **Use 22.04, not 24.04.** The SEED Emulator version we use needs old pinned Python packages (web3 5.31.1, requests 2.22.0 ...).
 We tried to install them on both versions (in containers): on Ubuntu 22.04 (Python 3.10) it works; on Ubuntu 24.04 (Python 3.12) the import of `seedemu`
 fails three times in a row (`urllib3` needs `six.moves`, `web3` needs `pkg_resources`, `parsimonious` needs `inspect.getargspec`), and it is not worth patching.
-(Ubuntu 20.04 is not recommended: it has no `docker-compose-v2` package, so step 8 needs Docker's own repository instead,
-and its standard support has ended. Our lab VMs run 20.04, but Docker on them was set up long before this guide.)
+(Ubuntu 20.04, Python 3.8, also works, with the same commands: our test VMs run it.)
 
 *You should see:* a file `ubuntu-22.04...-live-server-amd64.iso` of about 2 GB.
 
@@ -128,7 +127,7 @@ sudo apt update && sudo apt install -y git python3 python3-venv python3-dev buil
 
 (`python3-venv`, `python3-dev` and `build-essential` are for the Python environment of the SEED Emulator, step 13; `build-essential` is only needed when a Python package has to be compiled.)
 
-*You should see:* the install finishes without red errors. Check: `python3 --version` prints `Python 3.10.x` on Ubuntu 22.04.
+*You should see:* the install finishes without red errors. Check: `python3 --version` prints `Python 3.10.x` on Ubuntu 22.04 (`3.8.x` on 20.04).
 
 ### 7. Check the clock
 
@@ -144,7 +143,7 @@ Do not set the clock by hand while the chain runs.
 ### 8. Docker Engine and the compose plugin
 
 We use the Docker packages of Ubuntu itself (`docker.io` and `docker-compose-v2`); they are the ones the scripts were tested with
-(on Ubuntu 22.04 they are Docker 29.x and Compose 2.40.x from the `universe` repository).
+(on Ubuntu 22.04 they are Docker 29.x and Compose 2.40.x, on 20.04 Docker 26.1 and Compose 2.27, from the `universe` repository).
 
 ```
 sudo apt install -y docker.io docker-compose-v2
@@ -154,20 +153,6 @@ sudo apt install -y docker.io docker-compose-v2
 
 (Alternative, the official packages from Docker's own repository: <https://docs.docker.com/engine/install/ubuntu/>; install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
 The scripts only need that `docker` and `docker compose` work.)
-
-**On Ubuntu 20.04** `docker-compose-v2` does not exist (`Unable to locate package`). Use Docker's own repository instead (Docker's documented
-method; for 20.04 it still serves Docker 28.1 and Compose 2.35, the last versions built for it):
-
-```
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-```
-
-If you ticked "docker" in the list of snaps while installing Ubuntu, remove that copy first: `sudo snap remove docker`.
 
 ### 9. Use Docker without sudo
 
