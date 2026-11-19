@@ -25,13 +25,24 @@ and the block rate of the chain on stderr.
 import argparse
 import re
 import statistics
+import sys
 from datetime import datetime, timezone
+from typing import Dict
 
+# One log line of "block became the chain tip": the UTC time with milliseconds (groups 1 and 2),
+# and the block hash (group 3).
 LINE = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.(\d+)Z\].*AddedToCurrentChain.*new tip: ([0-9a-f]{64})')
 
+# Which delay counts as the "95th percentile" row: index int(P95 * (n - 1)) of the sorted delays.
+P95 = 0.95
 
-def read_log(path, offset_ms):
-    """{block hash: UTC time in seconds when this node made it its tip}"""
+
+def read_log(path: str, offset_ms: float) -> Dict[str, float]:
+    """Return {block hash: UTC time in seconds when this node made it its tip}.
+
+    offset_ms is how far the clock of the node's machine is ahead of the reference clock; it is
+    subtracted from every timestamp. Only the first line per hash counts.
+    """
     seen = {}
     for line in open(path, errors='replace'):
         m = LINE.match(line)
@@ -41,11 +52,15 @@ def read_log(path, offset_ms):
     return seen
 
 
-def main():
+def main() -> None:
+    """Read the logs named on the command line, print one CSV row per node (and the block rate on stderr)."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--after', required=True, help='UTC time like 2026-10-29T14:00:00')
+    parser.add_argument('--after', required=True,
+                        help='ignore blocks forged before this UTC time, like 2026-10-29T14:00:00')
     parser.add_argument('--before', help='ignore blocks forged after this UTC time (a window in a log that goes on)')
-    parser.add_argument('logs', nargs='+', metavar='name=file[@offset_ms]')
+    parser.add_argument('logs', nargs='+', metavar='name=file[@offset_ms]',
+                        help='a node name, its log file, and optionally how many ms its clock is ahead '
+                             'of the reference clock (see clock-offsets.py)')
     args = parser.parse_args()
     after = datetime.fromisoformat(args.after).replace(tzinfo=timezone.utc).timestamp()
 
@@ -61,18 +76,19 @@ def main():
         for block, t in seen.items():
             if block not in forged or t < forged[block][0]:
                 forged[block] = (t, name)
-    before = datetime.fromisoformat(args.before).replace(tzinfo=timezone.utc).timestamp() if args.before else float('inf')
+    before = float('inf')
+    if args.before:
+        before = datetime.fromisoformat(args.before).replace(tzinfo=timezone.utc).timestamp()
     blocks = {b: f for b, f in forged.items() if after <= f[0] < before}
 
     for name, seen in nodes.items():
         delays = sorted((seen[b] - t) * 1000 for b, (t, forger) in blocks.items() if b in seen and forger != name)
         if delays:
             print('{},{},{:.0f},{:.0f},{:.0f}'.format(
-                name, len(delays), statistics.median(delays), delays[int(0.95 * (len(delays) - 1))], delays[-1]))
+                name, len(delays), statistics.median(delays), delays[int(P95 * (len(delays) - 1))], delays[-1]))
 
     times = sorted(t for t, _ in blocks.values())
     if len(times) > 1:
-        import sys
         print('# {} blocks in {:.0f} s = {:.1f} blocks/min'.format(
             len(times), times[-1] - times[0], 60 * (len(times) - 1) / (times[-1] - times[0])), file=sys.stderr)
 

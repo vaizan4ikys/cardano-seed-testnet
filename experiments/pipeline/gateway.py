@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Gateway: receives JSON-line readings over TCP, makes batches, hands them to a submit step.
 
+Runs on a gateway machine (a chain VM in the lab). Sensors (sensor.py) connect to --listen-port and send one JSON
+reading per line; the gateway checks them (layout.py), drops duplicates, writes batch files and calls the submit step.
+
   python3 gateway.py --B 100 --T 30 --listen-port 9100 --outbox outbox --submit dry
   python3 gateway.py --submit command --submit-command "./submit.sh {file} {hash}"
+  python3 gateway.py --help          all options with their defaults
 
 A batch is written when B readings are collected or the oldest reading has waited T seconds.
 Outbox files:   batch-000017-<sha256>.json          the metadata (never changed)
@@ -18,6 +22,8 @@ again (at-least-once), so the submit command should be idempotent by batch hash.
 The readings that wait in memory for their batch are lost if the process is killed
 (Ctrl-C and SIGTERM write them out first).
 """
+from __future__ import annotations
+
 import argparse
 import datetime
 import glob
@@ -29,18 +35,30 @@ import socketserver
 import subprocess
 import threading
 import time
+from typing import Callable, List, Optional, Union
 
 import layout
 
-WINDOW = 2000       # sequence numbers remembered per sensor, for duplicate detection
+WINDOW = 2000           # sequence numbers remembered per sensor, for duplicate detection
+SEQ_JUMP_WARN = 1000    # warn when a sequence number is this far below the highest seen (sensor restarted?)
+MAX_WARNED = 1000       # at most this many "first problem of a sensor" log lines (keeps the log and memory small)
+MAX_LINE = 65536        # longest line accepted from a sensor (bytes)
+SUBMIT_TIMEOUT = 120    # seconds a submit command may run
+EXIT_SENT, EXIT_REFUSED = 0, 2     # exit codes of the submit command (anything else = failed, retry later)
+
+# What a submit step returns: True (sent), False (failed, try again) or "refused" (never try again).
+SubmitResult = Union[bool, str]
+Submit = Callable[[str, str], SubmitResult]
 
 
-def default_log(msg):
+def default_log(msg: str) -> None:
+    """Print one line with the time of day."""
     stamp = datetime.datetime.now().strftime("%H:%M:%S")
     print("%s %s" % (stamp, msg), flush=True)
 
 
-def write_atomic(path, data):
+def write_atomic(path: str, data: bytes) -> None:
+    """Write a file so that a crash leaves either the old or the new content (temp file, fsync, rename)."""
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(data)
@@ -49,8 +67,12 @@ def write_atomic(path, data):
     os.replace(tmp, path)
 
 
-def make_submit(mode, template=None, log=default_log, timeout=120):
-    """Returns submit(path, hash) -> True (sent), False (failed, try again) or "refused" (never try again)."""
+def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], None] = default_log,
+                timeout: int = SUBMIT_TIMEOUT) -> Submit:
+    """Returns submit(path, hash) -> True (sent), False (failed, try again) or "refused" (never try again).
+
+    mode "dry" sends nothing; mode "command" runs the template (words {file} and {hash} are replaced; without
+    them the file and the hash are appended as the last two arguments)."""
     if mode == "dry":
         def submit(path, h):
             log("DRY submit (nothing sent): %s" % os.path.basename(path))
@@ -72,19 +94,25 @@ def make_submit(mode, template=None, log=default_log, timeout=120):
                 log("submit command failed to run: %s" % e)
                 return False
             tail = (r.stdout + r.stderr).strip()[-300:]
-            if r.returncode == 2:
+            if r.returncode == EXIT_REFUSED:
                 log("REFUSED, not retried: %s" % (tail.splitlines()[-1] if tail else "exit code 2"))
                 return "refused"
-            if r.returncode != 0:
+            if r.returncode != EXIT_SENT:
                 log("submit command exit %d: %s" % (r.returncode, tail))
-            return r.returncode == 0
+            return r.returncode == EXIT_SENT
         return submit
     raise ValueError("unknown submit mode: %s" % mode)
 
 
 class Gateway:
-    def __init__(self, outbox, B, T, submit, gateway_id="GW01", clock=time.monotonic, log=default_log,
-                 tx_reserve=layout.TX_RESERVE, max_tries=5):
+    """Collects readings, writes them as batch files into the outbox and submits the batch files.
+
+    B = readings per batch, T = seconds the oldest reading may wait. Thread safety: self.lock protects the
+    reading buffer and the counters, self.send_lock makes sure only one thread submits at a time."""
+
+    def __init__(self, outbox: str, B: int, T: float, submit: Submit, gateway_id: str = "GW01",
+                 clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = default_log,
+                 tx_reserve: int = layout.TX_RESERVE, max_tries: int = 5):
         if not layout.valid_id(gateway_id):
             raise ValueError("bad gateway id (use A-Z a-z 0-9 _ . -, 1-32 characters, not starting with 0x)")
         self.outbox, self.B, self.T, self.submit = outbox, B, T, submit
@@ -109,6 +137,7 @@ class Gateway:
 
     # state ------------------------------------------------------------
     def _load_state(self):
+        """Read state.json; if it is lost, at least continue the batch numbers after the files in the outbox."""
         try:
             with open(self.state_path) as f:
                 st = json.load(f)
@@ -123,6 +152,7 @@ class Gateway:
             self.next_batch = max(self.next_batch, n + 1)
 
     def _save_state(self):
+        """Write state.json (only the last WINDOW sequence numbers of every sensor)."""
         st = {"next_batch": self.next_batch,
               "seen": {k: sorted(v)[-WINDOW:] for k, v in self.seen.items()}}
         try:
@@ -132,6 +162,7 @@ class Gateway:
 
     # receiving --------------------------------------------------------
     def count_bad(self):
+        """Count a line that is not JSON (called by the TCP handler)."""
         with self.lock:
             self.stats["bad"] += 1
 
@@ -140,13 +171,13 @@ class Gateway:
         self.stats["bad"] += 1
         sid = raw.get("sensor_id") if isinstance(raw, dict) else None
         key = repr(sid)[:40] if sid is not None else "?"
-        if key not in self.warned and len(self.warned) < 1000:
+        if key not in self.warned and len(self.warned) < MAX_WARNED:
             self.warned.add(key)
             self.log("rejected reading of sensor %s: %s (more from this sensor are counted, not logged)"
                      % (key, err))
 
-    def add_reading(self, raw, now=None):
-        """Returns "ok", "dup", "bad" or "closed"."""
+    def add_reading(self, raw: object, now: Optional[float] = None) -> str:
+        """Check one received reading and put it into the buffer. Returns "ok", "dup", "bad" or "closed"."""
         with self.lock:
             if self.closed:
                 self.stats["late"] += 1
@@ -159,7 +190,8 @@ class Gateway:
             now = self.clock() if now is None else now
             sid = r["sensor_id"]
             top = self.maxseq.get(sid, -1)
-            if top - r["seq"] > 1000 and "restart:" + sid not in self.warned and len(self.warned) < 1000:
+            if (top - r["seq"] > SEQ_JUMP_WARN and "restart:" + sid not in self.warned
+                    and len(self.warned) < MAX_WARNED):
                 self.warned.add("restart:" + sid)
                 self.log("WARNING sensor %s: seq %d is far below the highest seen (%d): sensor restarted? "
                          "readings dropped as duplicates" % (sid, r["seq"], top))
@@ -177,7 +209,7 @@ class Gateway:
                 self._flush("B", now)
             return "ok"
 
-    def tick(self, now=None):
+    def tick(self, now: Optional[float] = None) -> None:
         """Flush when the oldest waiting reading is T seconds old."""
         with self.lock:
             now = self.clock() if now is None else now
@@ -185,6 +217,7 @@ class Gateway:
                 self._flush("T", now)
 
     def flush_now(self):
+        """Write whatever is in the buffer as batches (used at shutdown)."""
         with self.lock:
             if self.buf:
                 self._flush("shutdown", self.clock())
@@ -218,8 +251,9 @@ class Gateway:
         self.wake.set()
 
     # sending ----------------------------------------------------------
-    def _status(self, path):
-        """Returns "sent" or the number of failed tries so far (0 when none or no status file)."""
+    def _status(self, path: str) -> Union[str, int]:
+        """Returns "sent" or the number of failed tries so far (0 when none or no status file).
+        The status file holds "pending", "pending <tries>" or "sent"."""
         try:
             with open(path + ".status") as f:
                 words = f.read().split()
@@ -229,11 +263,13 @@ class Gateway:
             return "sent"
         return int(words[1]) if len(words) > 1 and words[1].isdigit() else 0
 
-    def pending_files(self):
+    def pending_files(self) -> List[str]:
+        """Batch files that are not "sent" yet, oldest first."""
         return [p for p in sorted(glob.glob(os.path.join(self.outbox, "batch-*.json")))
                 if self._status(p) != "sent"]
 
-    def _dead_letter(self, p, tries, why=None):
+    def _dead_letter(self, p: str, tries: int, why: Optional[str] = None) -> None:
+        """Move a batch file and its status to dead/ (never tried again)."""
         dead = os.path.join(self.outbox, "dead")
         os.makedirs(dead, exist_ok=True)
         write_atomic(p + ".status", b"dead %d" % tries)
@@ -243,10 +279,10 @@ class Gateway:
         self.log("DEAD LETTER: %s %s, moved to %s (not tried again; the readings are NOT on the chain)"
                  % (os.path.basename(p), why or "failed %d submits" % tries, dead))
 
-    def send_pending(self):
+    def send_pending(self) -> bool:
         """Submit pending batches, oldest first. A failure stops the run (retry later, keeps the
         order), except when the batch has now failed max_tries times: it goes to dead/ and the
-        next batches are tried."""
+        next batches are tried. Returns True when nothing is left pending."""
         with self.send_lock:
             for p in self.pending_files():
                 with open(p, "rb") as f:
@@ -275,7 +311,8 @@ class Gateway:
             return True
 
     # threads ----------------------------------------------------------
-    def start(self, retry=10.0):
+    def start(self, retry: float = 10.0) -> None:
+        """Start the two background threads: flusher (T timeout) and sender (submits, retries every `retry` s)."""
         def flusher():
             while not self.stop_ev.wait(0.1):
                 self.tick()
@@ -293,6 +330,7 @@ class Gateway:
             t.start()
 
     def shutdown(self):
+        """Stop the threads, write out the buffer, submit what is pending once more."""
         self.stop_ev.set()
         self.wake.set()
         for t in self.threads:
@@ -305,10 +343,12 @@ class Gateway:
 
 
 class Handler(socketserver.StreamRequestHandler):
+    """One sensor connection: one JSON reading per line."""
+
     def handle(self):
         gw = self.server.gw
         while True:
-            line = self.rfile.readline(65536)
+            line = self.rfile.readline(MAX_LINE)
             if not line:
                 break
             line = line.strip()
@@ -324,19 +364,22 @@ class Handler(socketserver.StreamRequestHandler):
 
 
 class Server(socketserver.ThreadingTCPServer):
+    """TCP server with one thread per sensor connection."""
     allow_reuse_address = True
     daemon_threads = True
 
 
-def main():
+def main() -> None:
+    """Read the options, start the gateway threads and the TCP server, run until Ctrl-C or SIGTERM."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--B", type=int, default=100, help="readings per batch")
     ap.add_argument("--T", type=float, default=30.0, help="max seconds the oldest reading waits")
-    ap.add_argument("--listen-host", default="127.0.0.1")
-    ap.add_argument("--listen-port", type=int, default=9100)
-    ap.add_argument("--outbox", default="outbox")
-    ap.add_argument("--gateway-id", default="GW01")
-    ap.add_argument("--submit", choices=["dry", "command"], default="dry")
+    ap.add_argument("--listen-host", default="127.0.0.1", help="address the sensors connect to")
+    ap.add_argument("--listen-port", type=int, default=9100, help="TCP port the sensors connect to")
+    ap.add_argument("--outbox", default="outbox", help="folder for batch files, status files and state.json")
+    ap.add_argument("--gateway-id", default="GW01", help="name written into every batch (the gateway id)")
+    ap.add_argument("--submit", choices=["dry", "command"], default="dry",
+                    help="dry = write batches only, command = run --submit-command for every batch")
     ap.add_argument("--submit-command", default=None,
                     help='template, e.g. "./submit.sh {file} {hash}" (no {..} = both appended)')
     ap.add_argument("--tx-reserve", type=int, default=layout.TX_RESERVE,
@@ -356,7 +399,9 @@ def main():
     srv = Server((a.listen_host, a.listen_port), Handler)
     srv.gw = gw
     gw.start(a.retry)
-    stop = lambda *_: threading.Thread(target=srv.shutdown).start()
+
+    def stop(*_):       # srv.shutdown() must not run in the thread that serves, so it gets its own thread
+        threading.Thread(target=srv.shutdown).start()
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     gw.log("listening on %s:%d, B=%d T=%gs, outbox=%s, submit=%s" %

@@ -26,7 +26,8 @@ KUPO_BIN=${KUPO_BIN:-$HOME/tools/kupo-$KUPO_VERSION/bin/kupo}
 SEED_EMULATOR=${SEED_EMULATOR:-$HOME/seed-emulator}
 
 # seed_python: prints the Python that must run seed-emulator (cardano.py and the import checks):
-#   $SEED_PYTHON if it is set, else ~/seed-venv/bin/python3 if that exists (made by scripts/install-tools.sh), else python3.
+#   $SEED_PYTHON if it is set, else ~/seed-venv/bin/python3 if that exists (made by scripts/install-tools.sh),
+#   else python3.
 # The virtual environment ~/seed-venv holds the pinned packages seed-emulator needs (web3 5.31.1 and others);
 # a machine that has them installed system-wide (our own VM) simply uses python3.
 seed_python() {

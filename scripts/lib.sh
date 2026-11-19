@@ -1,6 +1,6 @@
-# Shared settings and helpers. Every script starts with:
+# Shared settings and helpers of the Cardano testnet scripts. Sourced (not run) by almost every script:
 #
-#     source "$(dirname "$0")/lib.sh"          (scripts/ folder)
+#     source "$(dirname "$0")/lib.sh"          (from a script in the scripts/ folder)
 #
 # Pick the network with the NET variable (default 1):
 #
@@ -9,9 +9,13 @@
 #
 # Both networks can run side by side on one machine: they share no container
 # names, subnets or ports, and each keeps its files in build/net-<N>/.
+#
+# Variables set here: ROOT, NET, MAGIC, FIRST_AS, PROJECT, IMAGE, SOCKET, LABEL, BUILD, TESTNET, OUTPUT, SENT.
+# Functions: pool_container, require_pool, pool_router, tip_of, expose_rule.
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
+# ---- settings derived from NET ----
 NET=${NET:-1}
 MAGIC=$((41 + NET))                  # network magic: 42, 43, ...
 FIRST_AS=$((150 + 50 * (NET - 1)))   # AS of pool 1: 150, 200, ...
@@ -22,10 +26,13 @@ SOCKET=/node.socket                  # node socket inside the pool containers
 # display name of the pool hosts: Cardano-Pool-1 (net 1), Cardano2-Pool-1 (net 2), ...
 if [ "$NET" -eq 1 ]; then LABEL=Cardano; else LABEL=Cardano$NET; fi
 
+# ---- folders (all under build/net-<N>/, made by the scripts) ----
 BUILD=$ROOT/build/net-$NET
 TESTNET=$BUILD/testnet               # genesis files and keys (generated)
 OUTPUT=$BUILD/output                 # docker-compose files written by cardano.py (generated)
 SENT=$BUILD/sent                     # copies of the metadata messages sent to the chain
+
+# Container names look like as150h-Cardano-Pool-1-<ip>: the AS number of pool N is FIRST_AS + N - 1.
 
 # name of the running container of pool N (1, 2 or 3)
 pool_container() {
@@ -34,10 +41,13 @@ pool_container() {
 
 # same, but stop with an error if the pool is not running
 require_pool() {
-  local c
-  c=$(pool_container "$1")
-  [ -n "$c" ] || { echo "pool $1 of net-$NET is not running (start it with: NET=$NET ./run.sh)" >&2; exit 1; }
-  echo "$c"
+  local container
+  container=$(pool_container "$1")
+  [ -n "$container" ] || {
+    echo "pool $1 of net-$NET is not running (start it with: NET=$NET ./run.sh)" >&2
+    exit 1
+  }
+  echo "$container"
 }
 
 # name of the running SEED router container in front of pool N
@@ -58,13 +68,15 @@ tip_of() {
 # address of those packets makes the pool answer through the docker bridge instead.
 #   expose_rule add | del      (needs sudo; "del" never asks for a password)
 expose_rule() {
-  # only for machines outside the emulation (10.0.0.0/8 is SEED's address space): the pools' own traffic to
-  # pool 1 must not be rewritten, or after a while its connections can break (stale conntrack entries)
+  # Only for machines outside the emulation (10.0.0.0/8 is SEED's address space): the pools' own traffic to
+  # pool 1 must not be rewritten, or after a while its connections can break (stale conntrack entries).
   local rule=(POSTROUTING -p tcp ! -s 10.0.0.0/8 -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE)
+  # the older rule without "! -s 10.0.0.0/8" may still exist from earlier versions: "del" removes it too
+  local old_rule=(POSTROUTING -p tcp -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE)
   if [ "$1" = add ]; then
     sudo iptables -t nat -C "${rule[@]}" 2>/dev/null || sudo iptables -t nat -A "${rule[@]}"
   else
     while sudo -n iptables -t nat -D "${rule[@]}" 2>/dev/null; do :; done
-    while sudo -n iptables -t nat -D POSTROUTING -p tcp -d "10.$FIRST_AS.0.71" --dport 3001 -j MASQUERADE 2>/dev/null; do :; done
+    while sudo -n iptables -t nat -D "${old_rule[@]}" 2>/dev/null; do :; done
   fi
 }

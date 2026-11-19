@@ -2,7 +2,8 @@
 # Runs INSIDE pool 1's container (started by ../p0.sh), after p0-registry.sh.
 # Phase 0, step 2: one data transaction (metadata + one RECEIPT token minted under the gateway_write policy)
 # from gateway A (enrolled: must pass) and from gateway B (not enrolled: must be refused).
-#   p0-write.sh <magic>       needs /tmp/p0/gateway_write.plutus (the Aiken policy with its two parameters applied)
+#   p0-write.sh <magic>       needs gateway_write.plutus in the work dir $P0_DIR (default /tmp/p0): the Aiken policy
+#                             with its two parameters applied
 set -eu
 export CARDANO_NODE_SOCKET_PATH=/node.socket
 cli() { cardano-cli conway "$@"; }
@@ -13,12 +14,18 @@ PW=$(cli transaction policyid --script-file gateway_write.plutus)
 RHEX=$(printf 'RECEIPT' | od -An -tx1 | tr -d ' \n')
 for g in A B; do cli address build --payment-verification-key-file gw$g.vkey --testnet-magic "$MAGIC" > gw$g.addr; done
 
-wait_tx() { until cli query utxo --tx-in "$1#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; do sleep 0.5; done; }
+# wait_tx TXID: wait until output 0 of the transaction is visible (= it is in a block)
+wait_tx() {
+  until cli query utxo --tx-in "$1#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; do
+    sleep 0.5
+  done
+}
 
 # fund both gateways once (from the dedicated administrator, not from utxo1): 20 ADA to pay with + 5 ADA only for collateral each
 if [ ! -f funded ]; then
   read -r IN VAL < <(cli query utxo --address "$ADMIN" --output-json --testnet-magic "$MAGIC" \
-    | jq -r 'to_entries | map(select(.value.value|keys==["lovelace"])) | sort_by(-.value.value.lovelace)[0] | "\(.key) \(.value.value.lovelace)"')
+    | jq -r 'to_entries | map(select(.value.value|keys==["lovelace"])) | sort_by(-.value.value.lovelace)[0]
+             | "\(.key) \(.value.value.lovelace)"')
   FEE=1000000; OUT=50000000
   cli transaction build-raw --fee $FEE --tx-in "$IN" \
     --tx-out "$(cat gwA.addr)+20000000" --tx-out "$(cat gwA.addr)+5000000" \
@@ -35,8 +42,11 @@ data_tx() {   # data_tx A|B
   pkh=$(cat gw$g.pkh); addr=$(cat gw$g.addr)
   cli query utxo --address "$addr" --output-json --testnet-magic "$MAGIC" > gw$g.utxo.json
   local pay coll
-  pay=$(jq -r 'to_entries | map(select(.value.value|keys==["lovelace"])) | sort_by(-.value.value.lovelace)[0].key' gw$g.utxo.json)
-  coll=$(jq -r 'to_entries | map(select(.value.value|keys==["lovelace"])) | sort_by(.value.value.lovelace)[0].key' gw$g.utxo.json)
+  # pay = the biggest pure-lovelace coin, coll = the smallest one (collateral)
+  pay=$(jq -r 'to_entries | map(select(.value.value|keys==["lovelace"]))
+               | sort_by(-.value.value.lovelace)[0].key' gw$g.utxo.json)
+  coll=$(jq -r 'to_entries | map(select(.value.value|keys==["lovelace"]))
+                | sort_by(.value.value.lovelace)[0].key' gw$g.utxo.json)
   printf '{"1000":{"sensor":"AGRI_001","t":"%s","temp":2450,"scale":100}}\n' "$(date -u +%FT%TZ)" > meta$g.json
   local h; h=$(sha256sum meta$g.json | cut -d' ' -f1)
   printf '{"bytes":"%s"}\n' "$h" > red$g.json

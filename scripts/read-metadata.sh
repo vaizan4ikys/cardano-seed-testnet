@@ -11,19 +11,24 @@
 # {"674": {...}} or just the {"enc": ..., "msg": [...]} part.
 set -eo pipefail
 source "$(dirname "$0")/lib.sh"
+
+# ---- arguments ----
 SRC=${1:?usage: $0 <txid | file.json> [-i key file | -k password]}; shift
-IDENT=""; PASS=""
+IDENT=""        # age key file (-i)
+PASS=""         # shared password (-k)
 while getopts "i:k:" opt; do
   case $opt in
     i) IDENT=$OPTARG ;;
     k) PASS=$OPTARG ;;
-    *) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 1 ;;
+    *) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 1 ;;   # print the header above as usage
   esac
 done
+
+# a path to a file, or a txid saved by send-metadata.sh
 if [ -f "$SRC" ]; then FILE=$SRC; else FILE=$SENT/$SRC.json; fi
 [ -f "$FILE" ] || { echo "not found: $FILE"; exit 1; }
 
-# print "<enc>" on the first line, then the msg strings one per line
+# print "<enc>" on the first line (none, age or basic), then the msg strings one per line
 PARTS=$(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -34,13 +39,21 @@ for s in d["msg"]:
 ENC=$(head -1 <<< "$PARTS")
 BODY=$(tail -n +2 <<< "$PARTS")
 
+# LIST: the original message as a JSON list of strings
 case $ENC in
-  none)  LIST=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(json.dumps(d.get("674", d)["msg"]))' "$FILE") ;;
-  age)   [ -n "$IDENT" ] || { echo "encrypted for public keys: pass your key file with -i"; exit 1; }
-         LIST=$(age -d -i "$IDENT" <<< "$BODY") ;;
-  basic) [ -n "$PASS" ] || { echo "encrypted with a password: pass it with -k"; exit 1; }
-         LIST=$(openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -a -k "$PASS" <<< "$BODY") ;;
-  *)     echo "unknown encryption: $ENC"; exit 1 ;;
+  none)
+    LIST=$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(json.dumps(d.get("674", d)["msg"]))' "$FILE") ;;
+  age)
+    [ -n "$IDENT" ] || { echo "encrypted for public keys: pass your key file with -i"; exit 1; }
+    LIST=$(age -d -i "$IDENT" <<< "$BODY") ;;
+  basic)
+    [ -n "$PASS" ] || { echo "encrypted with a password: pass it with -k"; exit 1; }
+    LIST=$(openssl enc -d -aes-256-cbc -pbkdf2 -iter 10000 -a -k "$PASS" <<< "$BODY") ;;
+  *)
+    echo "unknown encryption: $ENC"; exit 1 ;;
 esac
 
 # the message was split into 64-byte strings; join them back together

@@ -5,24 +5,36 @@
   tip thread      asks the node for its tip every --tip-interval seconds (docker exec cardano-cli)
   HTTP server     GET /  the page, GET /api/state  the data as JSON, GET /health  a short status
 
+Runs on the chain VM (seedvm). Reads: page.html, gateways.json (name -> wallet address), Kupo over HTTP, the node
+tip through `docker exec`. Writes nothing. Environment: KUPO_URL = default of --kupo.
+
   python3 server.py                          # on seedvm: Kupo at http://10.150.0.71:1442, page on 127.0.0.1:8080
+  python3 server.py --port 8088 --kupo http://<pool-1 container ip>:1442
+  python3 server.py --help                   # all options with their defaults
   ssh -L 8080:127.0.0.1:8080 seedvm          # on the Mac, then open http://127.0.0.1:8080/
 
 Everything is kept in memory and rebuilt from Kupo at start. Standard library only.
 """
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import signal
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Type
 
 import reader
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))     # page.html and gateways.json are looked up here
+DEFAULT_KUPO = "http://10.150.0.71:1442"               # Kupo inside pool 1's container (lab address)
+DEFAULT_PORT = 8080
+REGISTRY_POLL_S = 3.0                                  # seconds between reads of the gateway registry
 
 
-def make_handler(rd, page_path):
+def make_handler(rd: reader.Reader, page_path: str) -> Type[BaseHTTPRequestHandler]:
+    """HTTP handler class serving GET / (page), /api/state (JSON for the page) and /health (short status)."""
     class Handler(BaseHTTPRequestHandler):
         server_version = "sensorpage"
 
@@ -47,7 +59,8 @@ def make_handler(rd, page_path):
                 self._send(200, body, "application/json")
             elif path == "/health":
                 s = rd.state(max_batches=0)
-                body = json.dumps({"ok": True, "kupo_ok": s["kupo"]["ok"], "tip_block": (s["tip"] or {}).get("block"),
+                body = json.dumps({"ok": True, "kupo_ok": s["kupo"]["ok"],
+                                   "tip_block": (s["tip"] or {}).get("block"),
                                    "batches": s["counts"]["batches"]}).encode()
                 self._send(200, body, "application/json")
             else:
@@ -59,12 +72,16 @@ def make_handler(rd, page_path):
     return Handler
 
 
-def main():
+def main() -> None:
+    """Read the options, start the polling threads and the HTTP server, run until Ctrl-C or SIGTERM."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", default="127.0.0.1", help="address to listen on (default 127.0.0.1: use an ssh tunnel)")
-    ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--kupo", default=os.environ.get("KUPO_URL", "http://10.150.0.71:1442"))
-    ap.add_argument("--gateways-file", default=os.path.join(HERE, "gateways.json"), help="name -> wallet address (json)")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on (default 127.0.0.1: use an ssh tunnel)")
+    ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="port of the page")
+    ap.add_argument("--kupo", default=os.environ.get("KUPO_URL", DEFAULT_KUPO),
+                    help="URL of Kupo (default: $KUPO_URL, else the lab address)")
+    ap.add_argument("--gateways-file", default=os.path.join(HERE, "gateways.json"),
+                    help="name -> wallet address (json)")
     ap.add_argument("--final-depth", type=int, default=60, help="blocks after which a batch is final (k)")
     ap.add_argument("--window", type=int, default=300, help="slots read again on every poll (rollback check)")
     ap.add_argument("--poll", type=float, default=2.0, help="seconds between Kupo polls")
@@ -74,10 +91,12 @@ def main():
                          "above the gateway batch time T")
     ap.add_argument("--limits", default="", help="out-of-range limits, e.g. temperature=-40:60,humidity=0:100")
     ap.add_argument("--container", default=None, help="pool 1 container name (default: found with docker ps)")
-    ap.add_argument("--magic", type=int, default=42)
+    ap.add_argument("--magic", type=int, default=42, help="network magic of the testnet (net 1 = 42)")
     ap.add_argument("--receipt-policy", default=None, help="policy id of the RECEIPT token (default: any policy)")
-    ap.add_argument("--registry-dir", default="/tmp/p0n", help="directory in pool 1's container with admin.addr, policy.id, token.hex "
-                    "(the registry coin is read through Kupo so the page can show who is approved); 'none' = do not read the registry")
+    ap.add_argument("--registry-dir", default="/tmp/p0n",
+                    help="directory in pool 1's container with admin.addr, policy.id, token.hex (the registry coin "
+                         "is read through Kupo so the page can show who is approved); "
+                         "'none' = do not read the registry")
     ap.add_argument("--page", default=os.path.join(HERE, "page.html"))
     a = ap.parse_args()
     if a.poll < 1 or a.tip_interval < 1:
@@ -92,17 +111,19 @@ def main():
     print("gateways: %s" % (", ".join(sorted(gateways)) or "none (file %s)" % a.gateways_file), flush=True)
     stop = threading.Event()
     rd.poll_tip()           # first tip before the first Kupo round, so old batches get a depth estimate at once
-    threads = [threading.Thread(target=reader.run_loop, args=(rd.poll_once, a.poll, stop), daemon=True)]
+
+    def loop_thread(fn, interval):
+        return threading.Thread(target=reader.run_loop, args=(fn, interval, stop), daemon=True)
+    threads = [loop_thread(rd.poll_once, a.poll)]
     if registry:
-        threads.append(threading.Thread(target=reader.run_loop, args=(registry.poll, 3.0, stop), daemon=True))
-    threads += [
-               threading.Thread(target=reader.run_loop, args=(rd.poll_tip, a.tip_interval, stop), daemon=True)]
+        threads.append(loop_thread(registry.poll, REGISTRY_POLL_S))
+    threads.append(loop_thread(rd.poll_tip, a.tip_interval))
     for t in threads:
         t.start()
     httpd = ThreadingHTTPServer((a.host, a.port), make_handler(rd, a.page))
     httpd.daemon_threads = True
 
-    def shutdown(signum, frame):
+    def shutdown(signum, frame):        # httpd.shutdown() blocks, so it runs in its own thread
         stop.set()
         threading.Thread(target=httpd.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, shutdown)

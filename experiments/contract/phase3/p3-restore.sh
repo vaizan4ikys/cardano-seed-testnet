@@ -9,5 +9,9 @@ cd $W
 jq -n -c --arg a "$(cat $P0/gwA.pkh)" '[$a]' > listA.json
 set_registry listA.json
 L=$(registry_list)
-[ "$L" = "[\"$(cat $P0/gwA.pkh)\"]" ] && echo "OK: registry list is exactly [A] (coin $(find_registry))" || { echo "FAIL: registry list is $L"; exit 1; }
+if [ "$L" = "[\"$(cat $P0/gwA.pkh)\"]" ]; then
+  echo "OK: registry list is exactly [A] (coin $(find_registry))"
+else
+  echo "FAIL: registry list is $L"; exit 1
+fi
 rm -f kP.skey kS.skey kR.skey kX.skey && echo "OK: measurement signing keys deleted"

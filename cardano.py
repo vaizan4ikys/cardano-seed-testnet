@@ -6,12 +6,22 @@ Private Cardano testnet inside the SEED emulator.
 Three stake pools run on hosts in three different stub ASes. They talk to each
 other over the emulated Internet (BGP/OSPF routers), not over docker bridges.
 
-Normally started through ./run.sh. Settings come from environment variables:
+Normally started through ./run.sh, which first runs scripts/gen-testnet.sh and
+then this file with the Python of the seed-emulator environment:
+
+    PYTHONPATH=~/seed-emulator python3 cardano.py
+
+Settings come from environment variables:
 
     NET=1|2|...   which network to build (default 1)
     ARCH=arm|amd  CPU architecture of the containers (default: this machine's)
     EXPOSE=1      publish pool 1's port on the host machine, so that nodes on
                   OTHER machines can join (host port 3001 for net 1, 3002 for net 2)
+
+Reads:   build/net-<N>/testnet/   genesis files and keys made by scripts/gen-testnet.sh
+         (it is mounted into every pool container as /cardano)
+Writes:  build/net-<N>/output/    docker-compose files and one folder per container
+Prints:  "net-<N>: pool IPs [...]" (and the published port when EXPOSE=1)
 
 Every network gets its own AS, IX and transit numbers, so several of them can
 run on one machine without colliding:
@@ -26,13 +36,15 @@ import platform as host
 
 from seedemu import *
 
+# ---- settings (see the docstring above) ----
 NET = int(os.environ.get('NET', '1'))
 ARCH = os.environ.get('ARCH', 'arm' if host.machine() in ('aarch64', 'arm64') else 'amd')
-
-PORT = 3001                                   # Cardano node-to-node port
 EXPOSE = os.environ.get('EXPOSE') == '1'
+
+# ---- fixed values ----
+PORT = 3001                                   # Cardano node-to-node port
 HOST_PORT = PORT + NET - 1                    # port on the host when EXPOSE=1: 3001, 3002, ...
-IMAGE_NAME = 'seedemu-cardano:local'
+IMAGE_NAME = 'seedemu-cardano:local'          # the same name is built by run.sh and used by scripts/lib.sh
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BUILD = os.path.join(ROOT, 'build', 'net-{}'.format(NET))
 TESTNET = os.path.join(BUILD, 'testnet')      # genesis + keys, made by scripts/gen-testnet.sh
@@ -50,8 +62,12 @@ POOL_ASNS = [150 + STUB_SHIFT, 151 + STUB_SHIFT, 152 + STUB_SHIFT]
 # It lists every SEED container on the machine, so it shows the other networks too.
 WITH_MAP = NET == 1
 
+# Display name of the pool hosts: Cardano-Pool-1 (net 1), Cardano2-Pool-1 (net 2), ...
+# (scripts/lib.sh finds the containers by this name)
+LABEL = 'Cardano' if NET == 1 else 'Cardano{}'.format(NET)
 
-def make_internet():
+
+def make_internet() -> Emulator:
     """The SEED 'ten stub ASes' Internet, with every number shifted for this network.
 
     Same layout as Makers.makeEmulatorBaseWith10StubASAndHosts, but with
@@ -101,8 +117,8 @@ def make_internet():
     return emu
 
 
-def pool_topology(own_index, pool_ips):
-    """Topology file of one pool: it dials every other pool."""
+def pool_topology(own_index: int, pool_ips: list) -> dict:
+    """Topology file (as a dict) of one pool: it dials every other pool."""
     peers = [{'address': ip, 'port': PORT} for j, ip in enumerate(pool_ips) if j != own_index]
     return {
         'localRoots': [{'accessPoints': peers, 'advertise': False,
@@ -112,7 +128,7 @@ def pool_topology(own_index, pool_ips):
     }
 
 
-def pool_command(n):
+def pool_command(n: int) -> str:
     """Shell command that starts the cardano-node of pool n inside its container."""
     keys = '/cardano/pools-keys/pool{}'.format(n)
     return (
@@ -130,31 +146,36 @@ def pool_command(n):
     ).format(port=PORT, k=keys)
 
 
-emu = make_internet()
-emu.render()   # assigns the IP addresses, which the topology files need
+def main() -> None:
+    """Build the Internet, put the three pools on it and write the docker-compose files."""
+    emu = make_internet()
+    emu.render()   # assigns the IP addresses, which the topology files need
 
-base = emu.getLayer('Base')
-pools = [base.getAutonomousSystem(asn).getHost('host_0') for asn in POOL_ASNS]
-pool_ips = [str(p.getInterfaces()[0].getAddress()) for p in pools]
+    base = emu.getLayer('Base')
+    pools = [base.getAutonomousSystem(asn).getHost('host_0') for asn in POOL_ASNS]
+    pool_ips = [str(p.getInterfaces()[0].getAddress()) for p in pools]
 
-for i, node in enumerate(pools):
-    n = i + 1
-    label = 'Cardano' if NET == 1 else 'Cardano{}'.format(NET)
-    node.setDisplayName('{}-Pool-{}'.format(label, n))
-    node.setFile('/cardano-topology.json', json.dumps(pool_topology(i, pool_ips), indent=2))
-    node.addSharedFolder('/cardano', TESTNET)
-    node.appendStartCommand(pool_command(n), fork=True)
+    for i, node in enumerate(pools):
+        n = i + 1
+        node.setDisplayName('{}-Pool-{}'.format(LABEL, n))
+        node.setFile('/cardano-topology.json', json.dumps(pool_topology(i, pool_ips), indent=2))
+        node.addSharedFolder('/cardano', TESTNET)
+        node.appendStartCommand(pool_command(n), fork=True)
 
-if EXPOSE:
-    pools[0].addPort(HOST_PORT, PORT)
+    if EXPOSE:
+        pools[0].addPort(HOST_PORT, PORT)
 
-docker = Docker(internetMapEnabled=WITH_MAP, platform={'arm': Platform.ARM64, 'amd': Platform.AMD64}[ARCH])
-docker.addImage(DockerImage(name=IMAGE_NAME, software=[]), priority=100)
-for node in pools:
-    docker.setImageOverride(node, IMAGE_NAME)
+    docker = Docker(internetMapEnabled=WITH_MAP, platform={'arm': Platform.ARM64, 'amd': Platform.AMD64}[ARCH])
+    docker.addImage(DockerImage(name=IMAGE_NAME, software=[]), priority=100)
+    for node in pools:
+        docker.setImageOverride(node, IMAGE_NAME)
 
-os.makedirs(BUILD, exist_ok=True)   # SEED creates only the last folder of the path
-emu.compile(docker, OUTPUT, override=True)
-print('net-{}: pool IPs {}'.format(NET, pool_ips))
-if EXPOSE:
-    print('pool 1 is published on host port {}'.format(HOST_PORT))
+    os.makedirs(BUILD, exist_ok=True)   # SEED creates only the last folder of the path
+    emu.compile(docker, OUTPUT, override=True)
+    print('net-{}: pool IPs {}'.format(NET, pool_ips))
+    if EXPOSE:
+        print('pool 1 is published on host port {}'.format(HOST_PORT))
+
+
+if __name__ == '__main__':
+    main()

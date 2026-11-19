@@ -1,8 +1,14 @@
 #!/bin/bash
-# Latency of one transaction submitted at a remote node. Run it on your own machine.
+# Latency of one transaction submitted at a remote node. Runs on your own machine (the Mac); the pool VM
+# and the node's VM are reached over ssh. The drivers (run-all.sh, hops.sh, profiles.sh) call it.
 #
-#   ./tx-latency.sh <vm>             e.g. ./tx-latency.sh seedvm2
-#   POOL=seedvm ./tx-latency.sh ...  the machine that hosts the network (default: seedvm)
+# Usage:
+#   ./tx-latency.sh <vm>                e.g. ./tx-latency.sh seedvm2
+#
+# Environment (default):
+#   POOL   the VM that hosts the network      (POOL_HOST from scripts/config.sh)
+#   NAME   container of the node on <vm>      (cardano-joiner; hops.sh uses hop1, hop2, ...)
+#   NET    network number                     (1; network magic = 41 + NET, as in scripts/lib.sh)
 #
 # The pool machine builds and signs a metadata transaction (it holds the key, the joiners
 # have none). <vm> submits it through its own node. Prints two numbers, comma separated:
@@ -21,10 +27,11 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
+source "$HERE/../../scripts/config.sh"            # POOL_HOST, REPO
+
 VM=${1:?usage: $0 <vm>}
-POOL=${POOL:-seedvm}
-REPO=cardano-seed-testnet
-MAGIC=$((41 + ${NET:-1}))
+POOL=${POOL:-$POOL_HOST}
+MAGIC=$((41 + ${NET:-1}))                         # same formula as scripts/lib.sh
 METADATA="{\"674\": {\"msg\": [\"latency test via $VM\"]}}"
 
 # stderr of ssh carries a harmless OpenSSH warning on the VMs; hide only that

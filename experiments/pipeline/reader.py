@@ -20,7 +20,13 @@ the name of that address; a batch whose declared id does not match the name of i
 Clocks: the sensor timestamps come from the sensor machine. "Silent" is decided only with the server clock: the
 time since this server last saw a NEW reading arrive from the chain. The age by the sensor clock is also given,
 but only for information.
+
+Used by server.py (nothing to run here). Input: Kupo over HTTP, the node tip from `docker exec ... cardano-cli`,
+gateways.json. Output: the dict returned by Reader.state() (the JSON of /api/state: its field names are the contract
+with page.html). Nothing is written to disk.
 """
+from __future__ import annotations
+
 import datetime
 import json
 import math
@@ -29,22 +35,31 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import kupo_reader
 import layout
 
 RECEIPT_HEX = "52454345495054"          # "RECEIPT" as hex (asset name of the receipt token)
 UNITS = {"temperature": "°C", "humidity": "%", "soil_moisture": "%"}
+# kind -> (lowest, highest) normal value; outside = "out of range" (server.py --limits changes them)
 DEFAULT_LIMITS = {"temperature": (-40.0, 60.0), "humidity": (0.0, 100.0), "soil_moisture": (0.0, 100.0)}
 LIVE_LAG_SLOTS = 30          # a batch first seen this close to the tip is "just included"
 TIP_STALE_S = 10             # a tip older than this is not used as the first-seen block
+DOCKER_TIMEOUT_S = 20        # seconds for one docker command (tip query, registry files)
+POOL1_NAME_PART = "-Pool-1-"  # part of the name of pool 1's container
+DEFAULT_MAGIC = 42           # network magic of net 1
+DEFAULT_REGISTRY_DIR = "/tmp/p0n"   # folder in pool 1's container with admin.addr, policy.id, token.hex
+FALLBACK_BLOCKS_PER_SLOT = 0.2      # used for depth estimates while the tip has no usable ratio yet
+MIN_LOOP_SLEEP_S = 0.2       # run_loop never spins faster than this
 
 
-def default_log(msg):
+def default_log(msg: str) -> None:
+    """Print one line with the time of day."""
     print("%s %s" % (datetime.datetime.now().strftime("%H:%M:%S"), msg), flush=True)
 
 
-def parse_limits(text):
+def parse_limits(text: Optional[str]) -> Dict[str, Tuple[float, float]]:
     """'temperature=-40:60,humidity=0:100' -> dict kind -> (lo, hi). Starts from the defaults."""
     out = dict(DEFAULT_LIMITS)
     for part in filter(None, (text or "").split(",")):
@@ -56,7 +71,7 @@ def parse_limits(text):
     return out
 
 
-def load_gateways(path):
+def load_gateways(path: str) -> Dict[str, str]:
     """gateways.json: {"GW01": "addr_test1...", ...}. Returns {} if the file is missing."""
     try:
         with open(path) as f:
@@ -68,12 +83,14 @@ def load_gateways(path):
 
 # ---------------------------------------------------------------- the layout check
 
-def _is_int(x):
+def _is_int(x: Any) -> bool:
+    """True for integers, but not for True/False."""
     return isinstance(x, int) and not isinstance(x, bool)
 
 
-def parse_our_batch(obj):
-    """Metadata object of label 1000 -> dict (gateway, batch_no, t0, readings). ValueError if it is not our layout."""
+def parse_our_batch(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Metadata object of label 1000 -> dict (gateway, batch_no, t0, readings).
+    ValueError if it is not our layout."""
     v = obj.get(str(layout.LABEL))
     if not isinstance(v, list) or len(v) != 5:
         raise ValueError("label 1000 is not a list of 5")
@@ -98,7 +115,8 @@ def parse_our_batch(obj):
 
 # ---------------------------------------------------------------- Kupo and node access
 
-def parse_prometheus(text):
+def parse_prometheus(text: str) -> Dict[str, float]:
+    """Prometheus text ("name value" per line, # = comment) -> {name: value}."""
     out = {}
     for line in text.splitlines():
         if line and not line.startswith("#"):
@@ -111,31 +129,36 @@ def parse_prometheus(text):
     return out
 
 
-def parse_health(text):
+def parse_health(text: str) -> Dict[str, Any]:
     """Kupo's /health answer. Without an Accept header it is JSON, with Accept: text/plain it is Prometheus text."""
     if text.lstrip().startswith("{"):
         d = json.loads(text)
-        return {"checkpoint": int(d.get("most_recent_checkpoint") or 0), "node_tip": int(d.get("most_recent_node_tip") or 0),
+        return {"checkpoint": int(d.get("most_recent_checkpoint") or 0),
+                "node_tip": int(d.get("most_recent_node_tip") or 0),
                 "connected": d.get("connection_status") == "connected",
                 "synced": float(d.get("network_synchronization") or 0)}
     m = parse_prometheus(text)
-    return {"checkpoint": int(m.get("kupo_most_recent_checkpoint", 0)), "node_tip": int(m.get("kupo_most_recent_node_tip", 0)),
-            "connected": m.get("kupo_connection_status", 0) >= 1, "synced": m.get("kupo_network_synchronization", 0)}
+    return {"checkpoint": int(m.get("kupo_most_recent_checkpoint", 0)),
+            "node_tip": int(m.get("kupo_most_recent_node_tip", 0)),
+            "connected": m.get("kupo_connection_status", 0) >= 1,
+            "synced": m.get("kupo_network_synchronization", 0)}
 
 
 class KupoClient(kupo_reader.Kupo):
     """kupo_reader.Kupo plus /health and the raw /matches list."""
 
-    def health(self):
-        """{'checkpoint': slot, 'node_tip': slot, 'connected': bool, 'synced': float}. Raises if Kupo cannot be reached."""
+    def health(self) -> Dict[str, Any]:
+        """{'checkpoint': slot, 'node_tip': slot, 'connected': bool, 'synced': float}.
+        Raises if Kupo cannot be reached."""
         try:
             with urllib.request.urlopen(self.base + "/health", timeout=self.timeout) as r:
                 text = r.read().decode()
-        except urllib.error.HTTPError as e:      # Kupo answers 503 when it has no node connection; the body is still there
+        except urllib.error.HTTPError as e:      # Kupo answers 503 without a node connection; the body is still there
             text = e.read().decode()
         return parse_health(text)
 
-    def matches(self, after_slot):
+    def matches(self, after_slot: int) -> List[Dict[str, Any]]:
+        """Raw /matches list (all outputs created from after_slot on), oldest first."""
         data, _ = self._get("/matches", created_after=max(after_slot, 1), order="oldest_first")
         return data
 
@@ -143,17 +166,20 @@ class KupoClient(kupo_reader.Kupo):
 class DockerTip:
     """Node tip from cardano-cli inside the pool 1 container: get() -> {'block', 'slot', 'hash'}."""
 
-    def __init__(self, container=None, magic=42, timeout=20):
+    def __init__(self, container: Optional[str] = None, magic: int = DEFAULT_MAGIC, timeout: int = DOCKER_TIMEOUT_S):
         self.container, self.magic, self.timeout = container, magic, timeout
 
-    def _find(self):
-        r = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], capture_output=True, text=True, timeout=self.timeout)
+    def _find(self) -> str:
+        """Name of pool 1's container (found with docker ps)."""
+        r = subprocess.run(["docker", "ps", "--format", "{{.Names}}"],
+                           capture_output=True, text=True, timeout=self.timeout)
         for name in r.stdout.split():
-            if "-Pool-1-" in name:
+            if POOL1_NAME_PART in name:
                 return name
         raise RuntimeError("no pool 1 container found")
 
-    def get(self):
+    def get(self) -> Dict[str, Any]:
+        """Ask the node for its tip. Raises RuntimeError when docker or cardano-cli fails."""
         if not self.container:
             self.container = self._find()
         cmd = ["docker", "exec", self.container, "cardano-cli", "conway", "query", "tip",
@@ -169,14 +195,14 @@ class DockerTip:
         return {"block": int(d["block"]), "slot": int(d["slot"]), "hash": d["hash"]}
 
 
-
 # ---------------------------------------------------------------- the registry (who may send)
 
-_B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+_B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"      # the 32 characters of the bech32 alphabet
 
 
-def address_key_hash(addr):
-    """bech32 Cardano address -> payment key hash (28 bytes, hex), or None. Checksum is not verified (the address comes from our own file)."""
+def address_key_hash(addr: str) -> Optional[str]:
+    """bech32 Cardano address -> payment key hash (28 bytes, hex), or None.
+    The checksum is not verified (the address comes from our own file)."""
     try:
         _, data = addr.rsplit("1", 1)
         vals = [_B32.index(c) for c in data[:-6]]
@@ -192,20 +218,24 @@ def address_key_hash(addr):
         return None
 
 
-def parse_key_list(cbor_hex):
-    """The registry datum (CBOR: a list of 28-byte strings, definite or indefinite) -> [hex, ...]. Raises ValueError on anything else."""
+def parse_key_list(cbor_hex: str) -> List[str]:
+    """The registry datum (CBOR: a list of 28-byte strings, definite or indefinite) -> [hex, ...].
+    Raises ValueError on anything else."""
     b = bytes.fromhex(cbor_hex)
     pos = 0
 
     def head():
+        """Read one CBOR head at pos: (major type, length or number; None = indefinite length)."""
         nonlocal pos
-        ib = b[pos]; pos += 1
+        ib = b[pos]
+        pos += 1
         major, info = ib >> 5, ib & 31
         if info < 24:
             return major, info
         if info in (24, 25, 26, 27):
             n = 1 << (info - 24)
-            v = int.from_bytes(b[pos:pos + n], "big"); pos += n
+            v = int.from_bytes(b[pos:pos + n], "big")
+            pos += n
             return major, v
         if info == 31:
             return major, None
@@ -225,32 +255,39 @@ def parse_key_list(cbor_hex):
         major, ln = head()
         if major != 2 or ln is None:
             raise ValueError("registry list item is not a byte string")
-        keys.append(b[pos:pos + ln].hex()); pos += ln
+        keys.append(b[pos:pos + ln].hex())
+        pos += ln
     return keys
 
 
 class Registry:
-    """Reads the gateway list from the chain through Kupo: the one coin at the administrator address that holds the registry token."""
+    """Reads the gateway list from the chain through Kupo: the one coin at the administrator address that holds
+    the registry token."""
 
-    def __init__(self, kupo, directory="/tmp/p0n", container=None, clock=time.time, log=default_log):
+    def __init__(self, kupo: kupo_reader.Kupo, directory: str = DEFAULT_REGISTRY_DIR,
+                 container: Optional[str] = None, clock: Callable[[], float] = time.time,
+                 log: Callable[[str], None] = default_log):
         self.kupo, self.directory, self.container, self.clock, self.log = kupo, directory, container, clock, log
         self.ident = None                    # (address, "policy.token")
         self.keys, self.last_ok, self.error = None, None, "not asked yet"
 
-    def _identity(self):
+    def _identity(self) -> Tuple[str, str]:
+        """(administrator address, "policy.token") of the registry coin, read once from the files in the container."""
         if self.ident:
             return self.ident
         if not self.container:
             self.container = DockerTip()._find()
-        r = subprocess.run(["docker", "exec", self.container, "sh", "-c",
-                            "cd %s && for f in admin.addr policy.id token.hex; do cat $f; echo; done" % self.directory], capture_output=True, text=True, timeout=20)
+        read_files = "cd %s && for f in admin.addr policy.id token.hex; do cat $f; echo; done" % self.directory
+        r = subprocess.run(["docker", "exec", self.container, "sh", "-c", read_files],
+                           capture_output=True, text=True, timeout=DOCKER_TIMEOUT_S)
         parts = r.stdout.split()
         if r.returncode != 0 or len(parts) != 3:
             raise RuntimeError("registry files not found in %s" % self.directory)
         self.ident = (parts[0], parts[1] + "." + parts[2])
         return self.ident
 
-    def poll(self):
+    def poll(self) -> bool:
+        """Read the registry coin and its datum from Kupo. Returns True on success; an error is kept in self.error."""
         try:
             addr, asset = self._identity()
             data, _ = self.kupo._get("/matches/" + addr + "?unspent")
@@ -269,7 +306,8 @@ class Registry:
             return False
         return True
 
-    def info(self):
+    def info(self) -> Dict[str, Any]:
+        """The 'registry' part of the page state."""
         return {"known": self.keys is not None, "size": len(self.keys) if self.keys is not None else None,
                 "error": self.error, "age": None if self.last_ok is None else round(self.clock() - self.last_ok, 1)}
 
@@ -280,11 +318,17 @@ class Registry:
         h = address_key_hash(address)
         return None if h is None else h in self.keys
 
+
 # ---------------------------------------------------------------- the reader
 
 class Reader:
-    def __init__(self, kupo, tip_source, gateways=None, final_depth=60, window=300, silent_after=30,
-                 limits=None, receipt_policy=None, clock=time.time, log=default_log, kupo_url="", registry=None):
+    """The state of the page: every batch found on the chain, the node tip, Kupo's health. Thread safe (self.lock)."""
+
+    def __init__(self, kupo: KupoClient, tip_source: DockerTip, gateways: Optional[Dict[str, str]] = None,
+                 final_depth: int = 60, window: int = 300, silent_after: float = 30,
+                 limits: Optional[Dict[str, Tuple[float, float]]] = None, receipt_policy: Optional[str] = None,
+                 clock: Callable[[], float] = time.time, log: Callable[[str], None] = default_log,
+                 kupo_url: str = "", registry: Optional[Registry] = None):
         self.kupo, self.tip_source = kupo, tip_source
         self.registry = registry                                # Registry or None
         self.gateways = dict(gateways or {})                   # name -> address
@@ -308,7 +352,8 @@ class Reader:
 
     # ----------------------------------------------------------- tip
 
-    def poll_tip(self):
+    def poll_tip(self) -> bool:
+        """Ask the node for its tip. Returns True on success; an error is kept for the page."""
         try:
             t = self.tip_source.get()
         except Exception as e:
@@ -323,18 +368,22 @@ class Reader:
             self._latch()
         return True
 
-    def _blocks_per_slot(self):
+    def _blocks_per_slot(self) -> float:
+        """Average number of blocks per slot on this chain (from the tip), for depth estimates."""
         t = self.tip
-        return (t["block"] / float(t["slot"])) if t and t["slot"] > 0 and t["block"] > 0 else 0.2
+        if t and t["slot"] > 0 and t["block"] > 0:
+            return t["block"] / float(t["slot"])
+        return FALLBACK_BLOCKS_PER_SLOT
 
-    def _estimated_block(self, slot):
+    def _estimated_block(self, slot: int) -> Optional[int]:
+        """Block number of a batch in `slot`, guessed from the tip and the blocks-per-slot ratio."""
         t = self.tip
         if not t:
             return None
         back = int(round(max(t["slot"] - slot, 0) * self._blocks_per_slot()))
         return max(t["block"] - back, 1)
 
-    def _first_seen_block(self, slot):
+    def _first_seen_block(self, slot: int) -> Tuple[Optional[int], bool]:
         """(block, estimate) for a batch that has just been found."""
         t = self.tip
         if not t:
@@ -345,12 +394,14 @@ class Reader:
             return (t["block"] + 1 if t["slot"] < slot else t["block"]), False
         return self._estimated_block(slot), True
 
-    def _depth(self, rec):
+    def _depth(self, rec: Dict[str, Any]) -> Optional[int]:
+        """Blocks on top of the batch (1 = in the tip block); None if rolled back or not known."""
         if rec["rolled_back"] or rec["block"] is None or self.tip is None:
             return None
         return max(self.tip["block"] - rec["block"] + 1, 1)
 
     def _latch(self):
+        """Mark batches that reached final_depth as final (and keep them final)."""
         for rec in self.batches.values():
             if not rec["rolled_back"] and not rec["final"]:
                 d = self._depth(rec)
@@ -359,7 +410,7 @@ class Reader:
 
     # ----------------------------------------------------------- Kupo
 
-    def _kupo_failed(self, e):
+    def _kupo_failed(self, e: Exception) -> None:
         with self.lock:
             if self.kupo_state["ok"] or self.kupo_state["error"] is None:
                 self.log("indexer unreachable: %s" % e)
@@ -400,7 +451,8 @@ class Reader:
                 by[key]["out0"] = m
         return order
 
-    def _receipts(self, out0):
+    def _receipts(self, out0: Optional[Dict[str, Any]]) -> Optional[int]:
+        """Amount of the RECEIPT token in output #0 (None if there is none)."""
         if not out0:
             return None
         for asset, qty in (out0.get("value", {}).get("assets") or {}).items():
@@ -409,7 +461,8 @@ class Reader:
                 return int(qty)
         return None
 
-    def _handle(self, tx):
+    def _handle(self, tx: Dict[str, Any]) -> None:
+        """Take one transaction from the Kupo list: new batch, known batch (check for a rollback) or foreign."""
         slot, txid, header = tx["slot"], tx["txid"], tx["header"]
         with self.lock:
             rec = self.batches.get(txid)
@@ -447,10 +500,7 @@ class Reader:
                    "receipts": self._receipts(out0), "block": block, "estimate": estimate,
                    "seen_at": now, "rolled_back": False, "final": False, "reorgs": 0}
             self.batches[txid] = rec
-            seen = set()
-            for r in rec["readings"]:
-                seen.add((r["sensor"], r["kind"]))
-            for key in seen:
+            for key in {(r["sensor"], r["kind"]) for r in rec["readings"]}:
                 self.arrival[key] = now
             self.rev += 1
             self._latch()
@@ -478,16 +528,19 @@ class Reader:
                 if obj is None:
                     rec["rolled_back"] = True
                     self.rev += 1
-                    self.log("batch %s... (slot %d) is no longer on the chain: rolled back" % (rec["txid"][:12], rec["slot"]))
+                    self.log("batch %s... (slot %d) is no longer on the chain: rolled back"
+                             % (rec["txid"][:12], rec["slot"]))
                 elif header and header != rec["header"]:
                     self._reincluded(rec, rec["slot"], header)
 
     # ----------------------------------------------------------- what the page shows
 
-    def _signer_name(self, addr):
+    def _signer_name(self, addr: Optional[str]) -> Optional[str]:
+        """Name of the gateway that owns this wallet address (None if unknown)."""
         return self.names.get(addr) if addr else None
 
-    def _warnings(self, rec):
+    def _warnings(self, rec: Dict[str, Any]) -> List[str]:
+        """Texts for the page when the signer is unknown or differs from the gateway id inside the batch."""
         w = []
         name = self._signer_name(rec["signer"])
         if rec["signer"] is None:
@@ -516,26 +569,42 @@ class Reader:
         self._cache = (self.rev, table)
         return table
 
-    def _in_range(self, kind, value):
+    def _in_range(self, kind: str, value: float) -> bool:
         lo, hi = self.limits.get(kind, (-1e18, 1e18))
         return lo <= value <= hi
 
-    def state(self, max_batches=100, max_points=200):
+    def _batch_status(self, rec: Dict[str, Any]) -> str:
+        """Text shown on the page: "rolled back", "final" or "in a block"."""
+        if rec["rolled_back"]:
+            return "rolled back"
+        if rec["final"]:
+            return "final"
+        return "in a block"
+
+    def _batch_row(self, rec: Dict[str, Any], depth: Optional[int], now: float) -> Dict[str, Any]:
+        """One batch as the page shows it (field names are the contract with page.html)."""
+        return {
+            "txid": rec["txid"], "slot": rec["slot"], "header": rec["header"], "hash": rec["hash"],
+            "declared": rec["declared"], "batch_no": rec["batch_no"], "signer": rec["signer"],
+            "signer_name": self._signer_name(rec["signer"]), "receipts": rec["receipts"],
+            "readings": len(rec["readings"]), "block": rec["block"], "depth": depth,
+            "progress": None if depth is None else min(depth / float(self.final_depth), 1.0),
+            "status": self._batch_status(rec), "estimate": rec["estimate"], "reorgs": rec["reorgs"],
+            "seen_age": round(now - rec["seen_at"], 1), "warnings": self._warnings(rec)}
+
+    def state(self, max_batches: int = 100, max_points: int = 200) -> Dict[str, Any]:
+        """Everything the page shows, as plain data: the answer of /api/state.
+        max_batches = newest batches listed, max_points = newest points per sensor."""
         with self.lock:
             now = self.clock()
             tip = dict(self.tip) if self.tip else None
             if tip:
                 tip["age"] = round(now - self.tip_time, 1)
-            batches, counts = [], {"batches": 0, "final": 0, "rolled_back": 0, "estimate": 0, "readings": 0, "final_readings": 0}
-            per_gw = {}
-            for rec in reversed(list(self.batches.values())):
-                depth = self._depth(rec)
-                if rec["rolled_back"]:
-                    status = "rolled back"
-                elif rec["final"]:
-                    status = "final"
-                else:
-                    status = "in a block"
+            batches = []
+            counts = {"batches": 0, "final": 0, "rolled_back": 0, "estimate": 0, "readings": 0,
+                      "final_readings": 0}
+            per_gw = {}                 # signer address -> totals over its batches
+            for rec in reversed(list(self.batches.values())):          # newest first
                 counts["batches"] += 1
                 if rec["rolled_back"]:
                     counts["rolled_back"] += 1
@@ -544,8 +613,8 @@ class Reader:
                     counts["final"] += 1 if rec["final"] else 0
                     counts["final_readings"] += len(rec["readings"]) if rec["final"] else 0
                     counts["estimate"] += 1 if rec["estimate"] else 0
-                    g = per_gw.setdefault(rec["signer"], {"batches": 0, "readings": 0, "last_seen": 0, "last_slot": 0,
-                                                          "receipts": None})
+                    g = per_gw.setdefault(rec["signer"], {"batches": 0, "readings": 0, "last_seen": 0,
+                                                          "last_slot": 0, "receipts": None})
                     g["batches"] += 1
                     g["readings"] += len(rec["readings"])
                     if rec["seen_at"] >= g["last_seen"]:
@@ -554,19 +623,11 @@ class Reader:
                         g["last_slot"] = rec["slot"]
                         g["receipts"] = rec["receipts"]
                 if len(batches) < max_batches:
-                    batches.append({
-                        "txid": rec["txid"], "slot": rec["slot"], "header": rec["header"], "hash": rec["hash"],
-                        "declared": rec["declared"], "batch_no": rec["batch_no"], "signer": rec["signer"],
-                        "signer_name": self._signer_name(rec["signer"]), "receipts": rec["receipts"],
-                        "readings": len(rec["readings"]), "block": rec["block"], "depth": depth,
-                        "progress": None if depth is None else min(depth / float(self.final_depth), 1.0),
-                        "status": status, "estimate": rec["estimate"], "reorgs": rec["reorgs"],
-                        "seen_age": round(now - rec["seen_at"], 1), "warnings": self._warnings(rec)})
+                    batches.append(self._batch_row(rec, self._depth(rec), now))
             gws = []
-            for name, addr in self.gateways.items():
-                g = per_gw.pop(addr, None)
-                gws.append(self._gateway_row(name, addr, g, now))
-            for addr, g in per_gw.items():
+            for name, addr in self.gateways.items():             # known gateways first, in file order
+                gws.append(self._gateway_row(name, addr, per_gw.pop(addr, None), now))
+            for addr, g in per_gw.items():                       # then signers that are not in gateways.json
                 gws.append(self._gateway_row(None, addr, g, now))
             sensors = []
             for (sensor, kind), s in sorted(self._sensor_table().items()):
@@ -575,33 +636,42 @@ class Reader:
             ks["url"] = self.kupo_url
             ks["last_ok_age"] = None if ks["last_ok"] is None else round(now - ks["last_ok"], 1)
             del ks["last_ok"]
+            registry = (self.registry.info() if self.registry
+                        else {"known": False, "size": None, "error": "not configured", "age": None})
+            counts = dict(counts, skipped_foreign=len(self.skipped),
+                          other_transactions=len(self.foreign) - len(self.skipped), sensors=len(sensors))
             return {"server_time": now, "started": self.started, "tip": tip, "tip_error": self.tip_error,
                     "kupo": ks, "final_depth": self.final_depth, "silent_after": self.silent_after,
                     "limits": {k: list(v) for k, v in self.limits.items()},
-                    "counts": dict(counts, skipped_foreign=len(self.skipped), other_transactions=len(self.foreign) - len(self.skipped),
-                                   sensors=len(sensors)),
-                    "registry": self.registry.info() if self.registry else {"known": False, "size": None, "error": "not configured", "age": None},
+                    "counts": counts, "registry": registry,
                     "gateways": gws, "batches": batches, "sensors": sensors}
 
-    def _gateway_row(self, name, addr, g, now):
-        return {"name": name, "address": addr, "batches": g["batches"] if g else 0, "readings": g["readings"] if g else 0,
+    def _gateway_row(self, name: Optional[str], addr: str, g: Optional[Dict[str, Any]],
+                     now: float) -> Dict[str, Any]:
+        """One gateway as the page shows it; g = its totals (None if it has sent no batch)."""
+        return {"name": name, "address": addr, "batches": g["batches"] if g else 0,
+                "readings": g["readings"] if g else 0,
                 "last_batch_age": round(now - g["last_seen"], 1) if g else None,
                 "last_slot": g["last_slot"] if g else None, "receipts": g["receipts"] if g else None,
                 "approved": self.registry.approved(addr) if self.registry else None}
 
-    def _sensor_row(self, sensor, kind, s, now, max_points):
+    def _sensor_row(self, sensor: str, kind: str, s: Dict[str, Any], now: float,
+                    max_points: int) -> Dict[str, Any]:
+        """One sensor as the page shows it. Points are [ts, value, out-of-range flag 0/1, seq]."""
         pts = s["points"]
         scale = s["scale"]
-        digits = len(str(scale - 1)) if scale > 1 else 0
+        digits = len(str(scale - 1)) if scale > 1 else 0         # decimals to show: scale 100 -> 2
         ts, seq, raw = pts[-1]
         value = raw / float(scale)
-        recent = [[p[0], round(p[2] / float(scale), digits), 0 if self._in_range(kind, p[2] / float(scale)) else 1, p[1]]
+        recent = [[p[0], round(p[2] / float(scale), digits),
+                   0 if self._in_range(kind, p[2] / float(scale)) else 1, p[1]]
                   for p in pts[-max_points:]]
         out_count = sum(1 for p in pts if not self._in_range(kind, p[2] / float(scale)))
         arrived = self.arrival.get((sensor, kind), self.started)
         since = now - arrived
-        return {"sensor": sensor, "kind": kind, "gateway": s.get("gateway"), "unit": UNITS.get(kind, ""), "scale": scale,
-                "latest": round(value, digits), "text": "%.*f" % (digits, value), "last_ts": ts, "count": len(pts),
+        return {"sensor": sensor, "kind": kind, "gateway": s.get("gateway"), "unit": UNITS.get(kind, ""),
+                "scale": scale, "latest": round(value, digits), "text": "%.*f" % (digits, value),
+                "last_ts": ts, "count": len(pts),
                 "out_of_range": not self._in_range(kind, value), "out_of_range_count": out_count,
                 "seen_age": round(since, 1), "silent": since > self.silent_after,
                 "age_sensor_clock": round(now - ts, 1), "silent_sensor_clock": now - ts > self.silent_after,
@@ -610,7 +680,7 @@ class Reader:
 
 # ---------------------------------------------------------------- threads
 
-def run_loop(fn, interval, stop):
+def run_loop(fn: Callable[[], Any], interval: float, stop: threading.Event) -> None:
     """Call fn() every `interval` seconds until the stop event is set (an error in fn never ends the loop)."""
     while not stop.is_set():
         started = time.time()
@@ -618,4 +688,4 @@ def run_loop(fn, interval, stop):
             fn()
         except Exception as e:      # should not happen; keep going
             default_log("reader error: %r" % (e,))
-        stop.wait(max(interval - (time.time() - started), 0.2))
+        stop.wait(max(interval - (time.time() - started), MIN_LOOP_SLEEP_S))

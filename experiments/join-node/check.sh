@@ -1,10 +1,17 @@
 #!/bin/bash
 # Show the joined node's chain tip and its connection log, next to pool 1's tip.
+# Runs on the machine of the joined node (see join.sh); the log lines are the handshake / connection /
+# "Chain extended" lines of its log.
 #
+# Usage:
 #   ./check.sh                      local node: compares with pool 1 on this machine
 #   ./check.sh <user@host>          remote node: compares with pool 1 on that host (over SSH)
 #   NET=2 ./check.sh <user@host>    ... pool 1 of network 2 there
 #   ./check.sh ... 10               show 10 log lines instead of 3
+#
+# Environment (default):
+#   NET          network of pool 1 for a remote node       (1; a local node tells it by its AS number)
+#   REMOTE_REPO  folder of the repository on the host      (cardano-seed-testnet)
 set -uo pipefail
 
 NAME=cardano-joiner

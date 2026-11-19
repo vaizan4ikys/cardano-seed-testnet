@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Simulated sensors. One JSON line per reading, sent over TCP to the gateway.
+"""Simulated sensors. One JSON line per reading, sent over TCP to the gateway (gateway.py).
 
   python3 sensor.py --sensors 5 --interval 1 --duration 20 --port 9100
-  python3 sensor.py --sensors 3 --interval 1 --duration 5 --stdout        (dry run)
+  python3 sensor.py --sensors 3 --interval 1 --duration 5 --stdout        (dry run: print, send nothing)
+  python3 sensor.py --help                                                all options with their defaults
+
+Sensors are named AGRI_001, AGRI_002, ... and take the kinds temperature, humidity, soil_moisture in turn.
+Each value is a bounded random walk, with a few per cent out-of-range outliers (--outlier-pct).
+At the end it prints "sensor: sent N readings, dropped M" on stderr.
 
 Line format: {"sensor_id":"AGRI_001","seq":7,"ts":1760000000,"kind":"temperature","value":2450,"scale":100}
 Values are integers: 2450 with scale 100 means 24.50.
@@ -14,26 +19,35 @@ import random
 import socket
 import sys
 import time
+from typing import Any, Dict
 
-KIND_LIST = ["temperature", "humidity", "soil_moisture"]
+KIND_LIST = ["temperature", "humidity", "soil_moisture"]      # sensor i gets kind i % 3
 # kind: (normal low, normal high, scale)
 RANGES = {"temperature": (10.0, 35.0, 100), "humidity": (30.0, 90.0, 10),
           "soil_moisture": (10.0, 60.0, 10)}
+STEP_FRACTION = 0.02    # standard deviation of one random-walk step, as a fraction of the normal range
+CONNECT_TRIES = 5       # connection attempts (1 s apart) before a reading is dropped
+CONNECT_TIMEOUT = 5     # seconds for one connection attempt
+SEND_TRIES = 2          # send attempts per reading (the second one after a reconnect)
 
 
 class SimSensor:
-    def __init__(self, sensor_id, kind, rng, outlier_pct=0.0, seq_start=1):
+    """One simulated sensor: a bounded random walk inside the normal range of its kind."""
+
+    def __init__(self, sensor_id: str, kind: str, rng: random.Random, outlier_pct: float = 0.0,
+                 seq_start: int = 1):
         self.sensor_id, self.kind, self.rng = sensor_id, kind, rng
         self.outlier_pct = outlier_pct
         self.seq = seq_start
         lo, hi, _ = RANGES[kind]
         self.x = rng.uniform(lo + 0.2 * (hi - lo), hi - 0.2 * (hi - lo))
 
-    def reading(self, ts):
+    def reading(self, ts: float) -> Dict[str, Any]:
+        """The next reading (as a dict, field order = line format) taken at time ts."""
         lo, hi, scale = RANGES[self.kind]
         span = hi - lo
         # bounded random walk: small steps, kept inside [lo, hi]
-        self.x = min(hi, max(lo, self.x + self.rng.gauss(0, span * 0.02)))
+        self.x = min(hi, max(lo, self.x + self.rng.gauss(0, span * STEP_FRACTION)))
         v = self.x
         if self.rng.random() * 100 < self.outlier_pct:   # out-of-range value
             off = self.rng.uniform(0.2, 0.6) * span
@@ -47,27 +61,29 @@ class SimSensor:
 class Sink:
     """Sends lines to the gateway over TCP (reconnects), or to stdout."""
 
-    def __init__(self, host, port, to_stdout):
+    def __init__(self, host: str, port: int, to_stdout: bool):
         self.host, self.port, self.to_stdout = host, port, to_stdout
         self.sock = None
         self.sent = self.dropped = 0
 
-    def _connect(self):
-        for _ in range(5):
+    def _connect(self) -> bool:
+        """Try to connect to the gateway CONNECT_TRIES times; True when connected."""
+        for _ in range(CONNECT_TRIES):
             try:
-                self.sock = socket.create_connection((self.host, self.port), timeout=5)
+                self.sock = socket.create_connection((self.host, self.port), timeout=CONNECT_TIMEOUT)
                 return True
             except OSError:
                 time.sleep(1)
         return False
 
-    def send(self, line):
+    def send(self, line: str) -> None:
+        """Send one line (to stdout in dry-run mode). A reading that cannot be sent is counted as dropped."""
         if self.to_stdout:
             print(line, flush=True)
             self.sent += 1
             return
         data = (line + "\n").encode()
-        for _ in range(2):
+        for _ in range(SEND_TRIES):
             if self.sock is None and not self._connect():
                 break
             try:
@@ -79,13 +95,15 @@ class Sink:
         self.dropped += 1
 
     def close(self):
+        """Close the connection."""
         if self.sock:
             self.sock.close()
 
 
-def main():
+def main() -> None:
+    """Read the options, then send readings in time order until --duration is over or Ctrl-C."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sensors", type=int, default=5)
+    ap.add_argument("--sensors", type=int, default=5, help="number of simulated sensors")
     ap.add_argument("--interval", type=float, default=5.0, help="seconds between readings of one sensor")
     ap.add_argument("--jitter", type=float, default=0.2, help="interval varies by +- this fraction")
     ap.add_argument("--duration", type=float, default=0, help="seconds to run; 0 = until Ctrl-C")
@@ -93,10 +111,12 @@ def main():
     ap.add_argument("--silent-sensor", default=None, help="id of a sensor that goes silent, e.g. AGRI_002")
     ap.add_argument("--silent-after", type=float, default=10.0, help="seconds after start")
     ap.add_argument("--seq-start", type=int, default=1, help="first sequence number of every sensor")
-    ap.add_argument("--first-id", type=int, default=1, help="number of the first sensor id (AGRI_%%03d); gateways at different sites use different ranges")
-    ap.add_argument("--seed", type=int, default=None)
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=9100)
+    ap.add_argument("--first-id", type=int, default=1,
+                    help="number of the first sensor id (AGRI_%%03d); gateways at different sites use different "
+                         "ranges")
+    ap.add_argument("--seed", type=int, default=None, help="random seed (default: different every run)")
+    ap.add_argument("--host", default="127.0.0.1", help="gateway address")
+    ap.add_argument("--port", type=int, default=9100, help="gateway TCP port")
     ap.add_argument("--stdout", action="store_true", help="print the lines instead of sending them")
     a = ap.parse_args()
 

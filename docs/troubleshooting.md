@@ -43,3 +43,14 @@ TCP connections to `10.150.0.71:3001` (a `/dev/tcp` test from their containers f
 **Fix:** `expose_rule` in `scripts/lib.sh` now masquerades only traffic from outside 10.0.0.0/8. On a running network:
 `sudo iptables -t nat -D POSTROUTING -p tcp -d 10.150.0.71 --dport 3001 -j MASQUERADE`, then `expose_rule add` (new rule),
 then `sudo conntrack -D -d 10.150.0.71`. The pools reconnect and the shorter chain is replaced by the longer one.
+
+## Pools do not connect to each other, blocks come slowly (one VM, 19 November 2026)
+
+**Symptom:** the chain makes a block only every 10-15 s instead of about 5 s; the three pools show different tip hashes
+(`./scripts/check.sh`); in the router of AS150 `birdc show protocols` shows a BGP session "Active ... Connection reset by peer";
+the demo fails at step 5 or 6 because batches wait too long.
+**Cause:** docker reuses an image when it already exists. On one VM 14 images (routers and hosts) had been built with the
+files of other nodes (for example router r100 with the BGP config of r102), and every later `run.sh` reused them.
+**Fix (automatic since then):** `run.sh` runs `scripts/check-images.sh` after `docker compose up`: it compares the files in
+every container with the generated ones and rebuilds wrong images without the build cache. By hand:
+`./scripts/check-images.sh --check` (compare only) or `./scripts/check-images.sh` (compare and repair).

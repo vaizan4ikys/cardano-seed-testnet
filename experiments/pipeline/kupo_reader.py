@@ -10,15 +10,23 @@ batch file, so the page can check the batch hash (sha256 of those bytes).
 
 Recent blocks can still change (a rollback). Kupo sends the header hash of the block with every metadata
 answer (the X-Block-Header-Hash header); keep it, and show a batch as final only when it is k blocks deep.
+
+Used by reader.py (KupoClient adds /health and the raw match list). Reads from the network only, writes nothing.
 """
+from __future__ import annotations
+
 import json
 import urllib.parse
 import urllib.request
+from typing import Any, Dict, List, Optional, Tuple
 
 import layout
 
+DEFAULT_URL = "http://127.0.0.1:1442"   # Kupo on the same machine (the lab uses the container IP, see kupo.sh)
+TIMEOUT_S = 20                           # seconds for one HTTP request
 
-def schema_to_plain(s):
+
+def schema_to_plain(s: Dict[str, Any]) -> Any:
     """Kupo's typed metadata JSON -> plain JSON (bytes become "0x<hex>" strings)."""
     if "int" in s:
         return s["int"]
@@ -33,7 +41,7 @@ def schema_to_plain(s):
     raise ValueError("unknown metadata type: %r" % (s,))
 
 
-def batch_from_metadata(item):
+def batch_from_metadata(item: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """One item of Kupo's /metadata answer -> (metadata object, batch hash) for our label.
     Returns (None, None) if the transaction has no metadata under our label."""
     schema = item.get("schema", {})
@@ -44,15 +52,18 @@ def batch_from_metadata(item):
 
 
 class Kupo:
-    def __init__(self, base="http://127.0.0.1:1442", timeout=20):
+    """Small HTTP client for the two Kupo questions we need."""
+
+    def __init__(self, base: str = DEFAULT_URL, timeout: int = TIMEOUT_S):
         self.base, self.timeout = base, timeout
 
-    def _get(self, path, **params):
+    def _get(self, path: str, **params: Any) -> Tuple[Any, Dict[str, str]]:
+        """GET base+path (?params); returns (decoded JSON, response headers). Raises on network/HTTP errors."""
         url = self.base + path + ("?" + urllib.parse.urlencode(params) if params else "")
         with urllib.request.urlopen(url, timeout=self.timeout) as r:
             return json.loads(r.read().decode()), dict(r.headers)
 
-    def new_transactions(self, after_slot):
+    def new_transactions(self, after_slot: int) -> List[Tuple[int, str]]:
         """[(slot, transaction_id)] of transactions created at or after a slot, oldest first, no repeats."""
         matches, _ = self._get("/matches", created_after=max(after_slot, 1), order="oldest_first")
         seen, out = set(), []
@@ -63,7 +74,7 @@ class Kupo:
                 out.append(key)
         return out
 
-    def batch(self, slot, txid):
+    def batch(self, slot: int, txid: str) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
         """(metadata object, batch hash, block header hash) of one transaction, or (None, None, None)."""
         items, headers = self._get("/metadata/%d" % slot, transaction_id=txid)
         header = headers.get("X-Block-Header-Hash")

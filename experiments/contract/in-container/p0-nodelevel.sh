@@ -6,7 +6,10 @@
 set -eu
 MAGIC=$1; . /tmp/p0-scripts/p0-lib.sh
 REG=$(cat registry.ref)
-echo "== protocol parameters used: fee/byte $(jq .txFeePerByte pp.json), fixed $(jq .txFeeFixed pp.json), price mem $(jq .executionUnitPrices.priceMemory pp.json), price steps $(jq .executionUnitPrices.priceSteps pp.json), collateral % $(jq .collateralPercentage pp.json)"
+echo "== protocol parameters used: fee/byte $(jq .txFeePerByte pp.json), fixed $(jq .txFeeFixed pp.json)," \
+     "price mem $(jq .executionUnitPrices.priceMemory pp.json)," \
+     "price steps $(jq .executionUnitPrices.priceSteps pp.json)," \
+     "collateral % $(jq .collateralPercentage pp.json)"
 echo "== declared execution units (cli order steps,memory): $EXU"
 
 for g in B A; do
@@ -14,10 +17,13 @@ for g in B A; do
   mk_data_tx $g n$g "$PAY" "$PAYLOV" "$PAYTOK" "$COLL" "$COLLLOV" "$REG"
   echo "--- gateway $g: tx $TXID  size $SIZE bytes  fee $FEE lovelace  (spends $PAY, collateral $COLL)"
   MEM=$EXU_MEM; STP=$EXU_STEPS
-  awk -v s=$SIZE -v m=$MEM -v t=$STP -v pm=$(jq .executionUnitPrices.priceMemory pp.json) -v pt=$(jq .executionUnitPrices.priceSteps pp.json) \
+  PRICE_MEM=$(jq .executionUnitPrices.priceMemory pp.json); PRICE_STEPS=$(jq .executionUnitPrices.priceSteps pp.json)
+  awk -v s=$SIZE -v m=$MEM -v t=$STP -v pm=$PRICE_MEM -v pt=$PRICE_STEPS \
     'BEGIN{printf "    fee check: %d (size*1) + %.1f (memory*%s) + %.1f (steps*%s) = %.1f lovelace\n", s, m*pm, pm, t*pt, pt, s+m*pm+t*pt}'
   echo "    units the node measures for this tx (before submit):"
-  cli transaction calculate-plutus-script-cost online --testnet-magic "$MAGIC" --tx-file n$g.signed 2>&1 | jq -c '.[] | {memory: .executionUnits.memory, steps: .executionUnits.steps}' 2>/dev/null || echo "    (script fails: no units)"
+  cli transaction calculate-plutus-script-cost online --testnet-magic "$MAGIC" --tx-file n$g.signed 2>&1 \
+    | jq -c '.[] | {memory: .executionUnits.memory, steps: .executionUnits.steps}' 2>/dev/null \
+    || echo "    (script fails: no units)"
   if OUT=$(submit_tx n$g); then
     if [ $g = B ]; then echo "    UNEXPECTED: gateway B was accepted"; exit 1; fi
     echo "    ACCEPTED by the node: $OUT" | head -c 300; echo; wait_tx "$TXID" && echo "    now in a block"

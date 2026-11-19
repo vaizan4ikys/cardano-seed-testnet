@@ -1,28 +1,43 @@
 #!/bin/bash
-# Fork rate against the delay between the pools. Run from your own machine over SSH.
+# Fork rate against the delay between the pools. Runs on your own machine (the Mac) and drives the pool VM
+# over ssh.
 #
+# Usage:
 #   ./forks.sh                                  DELAYS="0 100 300 600", 20 minutes each
 #   DELAYS="0 200" MINUTES=5 ./forks.sh         a short test
 #
-# For each delay every pool gets that delay on what it sends (tc netem in the pool container),
-# so a block needs about that long to get from one pool to the next. Then the pool logs are
-# counted: blocks added to the chain, forks switched to (a block that lost against another one
-# for the same height), blocks the pools forged but did not adopt. It also takes the chain tip
-# at the start and at the end (blocks per minute that survive).
+# Environment (default):
+#   POOL     the VM that runs the pools                 (POOL_HOST from scripts/config.sh)
+#   DELAYS   delays in ms, one series each              ("0 100 300 600")
+#   MINUTES  minutes of counting per delay              (20)
+#   OUT      result folder                              (results/forks-<date-time> next to this script)
 #
-# Whatever load is running keeps running; the numbers are comparable between delays only if the
-# load is the same in all of them (start it before, or stop it before).
+# For each delay every pool gets that delay on what it sends (tc netem in the pool container), so a block
+# needs about that long to get from one pool to the next. Then the pool logs are counted: blocks added to
+# the chain, forks switched to (a block that lost against another one for the same height), blocks the
+# pools forged but did not adopt. It also takes the chain tip at the start and at the end (blocks per
+# minute that survive).
+#
+# Whatever load is running keeps running; the numbers are comparable between delays only if the load is
+# the same in all of them (start it before, or stop it before).
+# Output: results/forks-<date-time>/forks.csv (one row per delay and pool), setup.txt
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-POOL=${POOL:-seedvm}
+source "$HERE/../../scripts/config.sh"            # POOL_HOST, REPO
+
+POOL=${POOL:-$POOL_HOST}
 DELAYS=${DELAYS:-"0 100 300 600"}
 MINUTES=${MINUTES:-20}
 OUT=${OUT:-$HERE/results/forks-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"
 
-on() { ssh -A -o BatchMode=yes "$POOL" "cd cardano-seed-testnet && $*" 2> >(grep -v '^\*\*' >&2); }
-# delay (and nothing else) on the three pool containers; "clear" removes it
+# --- helpers (every ssh call hides the "**" banner lines of the VM) ---
+
+# run a command in the repository folder on the pool VM
+on() { ssh -A -o BatchMode=yes "$POOL" "cd $REPO && $*" 2> >(grep -v '^\*\*' >&2); }
+
+# netem set <delay ms>: only that delay on the three pool containers; netem clear: remove it
 netem() {
   on 'source scripts/lib.sh && for p in 1 2 3; do
         pid=$(docker inspect -f "{{.State.Pid}}" $(pool_container $p))
@@ -31,27 +46,37 @@ netem() {
       done'
 }
 trap 'netem clear' EXIT
+
+# block number of pool 1's tip
 tip() { on 'source scripts/lib.sh && tip_of 1' | grep -o '"block": *[0-9]*' | grep -o '[0-9]*$'; }
+
+# how many lines of pool $1's log contain the text $2
 count() { on 'source scripts/lib.sh && docker exec $(pool_container '"$1"') grep -c "'"$2"'" /var/log/cardano-node.log' || true; }
 
 echo "delay_ms,minutes,blocks,blocks_per_min,pool,extended,forks,forged,not_adopted" > "$OUT/forks.csv"
-echo "# $(date -u +%FT%TZ): ${MINUTES} min per delay; pools in one SEED network, delay on each pool's egress" > "$OUT/setup.txt"
+echo "# $(date -u +%FT%TZ): ${MINUTES} min per delay; pools in one SEED network, delay on each pool's egress" \
+  > "$OUT/setup.txt"
 
 for delay in $DELAYS; do
   echo "== delay $delay ms"
   netem set "$delay"
   sleep 60                                  # let the chain settle at the new delay
+
+  # counters at the start of the window (E = extended, F = forks, G = forged, N = not adopted), per pool
   B0=$(tip); T0=$(date +%s)
   for p in 1 2 3; do
     E0[$p]=$(count $p "Chain extended"); F0[$p]=$(count $p "AddBlockEvent.SwitchedToAFork")
     G0[$p]=$(count $p "Forge.Loop.ForgedBlock"); N0[$p]=$(count $p "Forge.Loop.DidntAdoptBlock")
   done
   sleep $((MINUTES * 60))
+
+  # counters at the end, and one row per pool with the differences
   B1=$(tip); T1=$(date +%s)
   for p in 1 2 3; do
     e=$(count $p "Chain extended"); f=$(count $p "AddBlockEvent.SwitchedToAFork")
     g=$(count $p "Forge.Loop.ForgedBlock"); n=$(count $p "Forge.Loop.DidntAdoptBlock")
-    awk -v d="$delay" -v s=$((T1 - T0)) -v b=$((B1 - B0)) -v p="pool$p" -v e=$((e - E0[$p])) -v f=$((f - F0[$p])) -v g=$((g - G0[$p])) -v n=$((n - N0[$p])) \
+    awk -v d="$delay" -v s=$((T1 - T0)) -v b=$((B1 - B0)) -v p="pool$p" \
+        -v e=$((e - E0[$p])) -v f=$((f - F0[$p])) -v g=$((g - G0[$p])) -v n=$((n - N0[$p])) \
       'BEGIN { printf "%s,%.1f,%d,%.2f,%s,%d,%d,%d,%d\n", d, s / 60, b, b * 60 / s, p, e, f, g, n }' >> "$OUT/forks.csv"
   done
 done
