@@ -4,12 +4,12 @@
 # Every value can be overridden with an environment variable that is set BEFORE the script is sourced:
 #   AIKEN=/path/to/aiken       KUPO_BIN=/path/to/kupo       SEED_EMULATOR=/path/to/seed-emulator
 #   SEED_PYTHON=/path/to/python3   (the Python that runs seed-emulator; see seed_python below)
-# Used by: experiments/contract/p0-aiken.sh, scripts/install-tools.sh, experiments/demo/fresh.sh (through ssh).
+# Used by: experiments/contract/p0-aiken.sh, install.sh, experiments/demo/fresh.sh (through ssh).
 
 AIKEN_VERSION=1.1.24
 KUPO_VERSION=2.12.0
 # the seed-emulator version this repository was built and tested with (release v1.1, Mar 2024);
-# install-tools.sh and the docs use it. SEED_COMMIT is the commit of that release tag.
+# install.sh and the docs use it. SEED_COMMIT is the commit of that release tag.
 SEED_TAG=v1.1
 SEED_COMMIT=e26637e915fb2f83be0b165d3fb731b400db6fe6
 
@@ -28,7 +28,7 @@ KUPO_BIN=${KUPO_BIN:-$HOME/tools/kupo-$KUPO_VERSION/bin/kupo}
 SEED_EMULATOR=${SEED_EMULATOR:-$HOME/seed-emulator}
 
 # seed_python: prints the Python that must run seed-emulator (cardano.py and the import checks):
-#   $SEED_PYTHON if it is set, else ~/seed-venv/bin/python3 if that exists (made by scripts/install-tools.sh),
+#   $SEED_PYTHON if it is set, else ~/seed-venv/bin/python3 if that exists (made by install.sh),
 #   else python3.
 # The virtual environment ~/seed-venv holds the pinned packages seed-emulator needs (web3 5.31.1 and others);
 # a machine that has them installed system-wide (our own VM) simply uses python3.

@@ -11,7 +11,7 @@ Follow the steps in order. Every step has the exact command and a line that says
 * A web page (opened in your Windows browser) that reads the data back from the chain.
 
 **Time:** plan about 1 hour the first time (installing Ubuntu, the downloads, the build of the docker image; it depends on your internet speed).
-On our test VM (2 CPUs, 4 GB RAM, fast internet) the steps 10 to 13 took together about 1.5 minutes, `fresh.sh --yes` 4.5 minutes and the rehearsal `demo.sh --yes` about 5 minutes
+On our test VM (2 CPUs, 4 GB RAM, fast internet) the home-folder part of `install.sh` took about 1.5 minutes (plus the apt downloads), `fresh.sh --yes` 4.5 minutes and the rehearsal `demo.sh --yes` about 5 minutes
 (the build of the `seedemu-cardano` docker image from scratch was not part of that run: see "Tested on").
 Later runs (a new chain with `fresh.sh --yes`, then the demo) need about 5 minutes plus the demo.
 
@@ -41,7 +41,7 @@ If it says "Disabled", switch it on in the BIOS/UEFI (the key at power-on differ
 Downloads. What was measured on the test VM: the SEED clone 400 MB on disk, its Python packages 70 MB, Aiken 14 MB, Kupo 54 MB (273 MB unpacked),
 the SEED router and map images about 1.1 GB on disk (pulled by the first `fresh.sh`).
 Not measured (plan for them): the Ubuntu ISO (about 2 GB), the apt packages for Docker and Python (about 150-250 MB), the base image `handsonsecurity/seedemu-multiarch-base` and the `cardano-node` image
-from ghcr.io that our image is built from. So "about 5 GB in total" is an estimate. `install-tools.sh` checks for 15 GB of free disk.
+from ghcr.io that our image is built from. So "about 5 GB in total" is an estimate. `install.sh` checks for 15 GB of free disk.
 
 ## Part A. Create the VM
 
@@ -96,7 +96,7 @@ Start the VM and go through the Ubuntu installer. Keep the defaults, except:
   `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`; `df -h /` then shows the bigger size.)
 * Your name, server name, **user name** and password: choose them and write them down. Below `<user>` means your user name.
 * **Install OpenSSH server**: tick it. (Leave "Import SSH identity" at No.)
-* Do not select extra "featured server snaps" (no docker snap: we install Docker in step 8).
+* Do not select extra "featured server snaps" (no docker snap: `install.sh` installs Docker in step 8).
 
 When the installer says "Installation complete", choose **Reboot Now**. If it asks to remove the installation medium, press Enter.
 
@@ -121,17 +121,19 @@ If `ssh` is "not recognized": Windows Settings -> Apps -> Optional features -> A
 If ssh says "REMOTE HOST IDENTIFICATION HAS CHANGED" (you had another VM on port 2222 before), run in PowerShell
 `ssh-keygen -R "[127.0.0.1]:2222"` and try again.
 
-## Part B. Install the system packages (in the VM)
+## Part B. Get the code and install everything (in the VM)
 
-### 6. Basic packages
+### 6. This repository
+
+Ubuntu Server already has `git`. The folder must be exactly `~/cardano-seed-testnet`: some scripts rely on it.
 
 ```
-sudo apt update && sudo apt install -y git python3 python3-venv python3-dev build-essential curl jq openssl rsync ca-certificates
+git clone https://github.com/vaizan4ikys/cardano-seed-testnet ~/cardano-seed-testnet
+cd ~/cardano-seed-testnet
 ```
 
-(`python3-venv`, `python3-dev` and `build-essential` are for the Python environment of the SEED Emulator, step 13; `build-essential` is only needed when a Python package has to be compiled.)
-
-*You should see:* the install finishes without red errors. Check: `python3 --version` prints `Python 3.10.x` on Ubuntu 22.04 (`3.8.x` on 20.04).
+*You should see:* `ls` lists `README.md`, `install.sh`, `run.sh`, `scripts`, `experiments`, `docs` ...
+(If `git` is "not found": `sudo apt update`, then `sudo apt install -y git`.)
 
 ### 7. Check the clock
 
@@ -144,30 +146,91 @@ timedatectl
 Why: the blockchain takes its time from the VM clock. The chain only starts if the clock is right, and `fresh.sh` refuses to start with an unsynchronised clock.
 Do not set the clock by hand while the chain runs.
 
-### 8. Docker Engine and the compose plugin
-
-We use the Docker packages of Ubuntu itself (`docker.io` and `docker-compose-v2`); they are the ones the scripts were tested with
-(on Ubuntu 22.04 they are Docker 29.x and Compose 2.40.x, on 20.04 Docker 26.1 and Compose 2.27, from the `universe` repository).
+### 8. Run the installer
 
 ```
-sudo apt install -y docker.io docker-compose-v2
+./install.sh
 ```
 
-*You should see:* no errors. `sudo systemctl is-active docker` prints `active`.
+It checks the VM, then installs what is missing, in this order:
 
-(Alternative, the official packages from Docker's own repository: <https://docs.docker.com/engine/install/ubuntu/>; install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
-The scripts only need that `docker` and `docker compose` work.)
+1. **System steps that need administrator rights** (`sudo`). It first SHOWS them and asks once; on a new Ubuntu they look like this:
+   ```
+   These steps need administrator rights (sudo). They are run exactly as shown:
+     sudo apt update                                            # refresh the package lists
+     sudo apt install -y docker.io docker-compose-v2 jq ...     # missing packages
+     sudo usermod -aG docker <user>                             # use docker without sudo (takes effect at the next login)
+     sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv     # give / the unused 10 GB of the disk
+   Run them now? sudo asks for your password once. [y/N]
+   ```
+   Type `y`, press Enter, then type your password (it is not shown while you type).
+   The `lvextend` line only appears when Ubuntu's installer left part of the disk unused (step 4).
+   Docker comes from Ubuntu's own packages (`docker.io`, `docker-compose-v2`: on 22.04 Docker 29.x and Compose 2.40.x,
+   on 20.04 Docker 26.1 and Compose 2.27). Prefer to type these commands yourself? Answer `N` and follow Part C.
+2. **Without sudo, into your home folder:** the SEED Emulator release v1.1 (`~/seed-emulator`, about 400 MB), its pinned Python
+   packages in the environment `~/seed-venv` (web3 5.31.1 and others, about 70 MB), **Aiken v1.1.24** (compiler of the smart
+   contract, checked against its published checksum) and **Kupo v2.12.0** (the indexer) for your CPU type in `~/tools`,
+   and the Aiken standard library (downloaded by `aiken check`, needs github.com).
+3. **All checks again.**
 
-### 9. Use Docker without sudo
+*You should see,* the first time, at the end:
+
+```
+Almost done: log out and in again (exit, then ssh again) so that docker works without sudo; then check:
+  ./install.sh --check
+```
+
+If `apt update` prints an error about `cdrom`, that is harmless (see the troubleshooting table). The scripts find SEED and
+`~/seed-venv` by themselves: there is nothing to put into `~/.bashrc`.
+
+### 9. Log in again and check
+
+Docker may only be used without `sudo` after a new login (Linux reads a user's groups when they log in; no reboot needed):
+
+```
+exit
+```
+
+In PowerShell log in again (`ssh -p 2222 <user>@127.0.0.1`), then:
+
+```
+cd ~/cardano-seed-testnet
+./install.sh --check
+```
+
+*You should see:* one `PASS` line per item (Linux, docker, docker compose, python3, git, curl, jq, openssl, rsync, seed-emulator,
+free disk at least 15 GB, RAM at least 3.5 GB, repository folder, Aiken, Kupo) and at the end `ALL PASS`.
+For every `FAIL` the script prints a hint; `./install.sh` (without `--check`) installs what it can.
+On an amd64 PC the Aiken folder is `aiken-x86_64-unknown-linux-musl` (not tested).
+
+## Part C. Optional: the same by hand (skip it if step 9 printed `ALL PASS`)
+
+Only if you answered `N` in step 8 and prefer to type the system commands yourself. Afterwards run `./install.sh` again:
+it then finds nothing to do with `sudo` and installs the rest.
+
+### 10. System packages
+
+```
+sudo apt update
+sudo apt install -y git python3 python3-venv python3-dev build-essential curl jq openssl rsync ca-certificates docker.io docker-compose-v2
+```
+
+(`python3-venv`, `python3-dev` and `build-essential` are for the Python environment of the SEED Emulator; `build-essential` is only
+needed when a Python package has to be compiled. An error of `apt update` about `cdrom`: see the troubleshooting table.)
+
+*You should see:* the install finishes without red errors; `sudo systemctl is-active docker` prints `active`.
+(Alternative for Docker, the official packages from Docker's own repository: <https://docs.docker.com/engine/install/ubuntu/>;
+install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`. The scripts only need that `docker`
+and `docker compose` work.)
+
+### 11. Use Docker without sudo
 
 ```
 sudo usermod -aG docker $USER
 exit
 ```
 
-`exit` closes the ssh session. In PowerShell log in again (`ssh -p 2222 <user>@127.0.0.1`). No restart of the VM is needed:
-Linux reads a user's groups when they log in, so a new login is enough (a reboot also works; to stay logged in,
-`newgrp docker` gives the group to the current terminal only). Then check:
+Log in again (a new login is enough; to stay logged in, `newgrp docker` gives the group to the current terminal only). Check:
 
 ```
 docker run --rm hello-world
@@ -175,76 +238,26 @@ docker compose version
 ```
 
 *You should see:* "Hello from Docker!" and a line like `Docker Compose version v2.x.x`.
-If you see "permission denied", the log out / log in did not happen yet (see the troubleshooting table).
 
-## Part C. Get the code and the tools (in the VM)
+### 12. Disk (only if `./install.sh --check` says `free disk ... needed: 15 GB`)
 
-### 10. The SEED Emulator
-
-SEED is the Python library that builds the emulated Internet around the nodes. It is cloned here; its Python packages are installed in step 13.
-Use exactly its release **v1.1** (March 2024, commit `e26637e`): the demo was built and tested with it.
+If the hint says that Ubuntu's installer left part of the disk unused, give it to `/`:
 
 ```
-git clone --branch v1.1 https://github.com/seed-labs/seed-emulator ~/seed-emulator
+sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv
+df -h /
 ```
 
-*You should see:* `Note: switching to 'e26637e915fb2f83be0b165d3fb731b400db6fe6'` and a long "detached HEAD" advice; that is normal
-(a release is a fixed version, not a branch you work on).
-The clone is about 400 MB and took 10 s on the test VM. If a different folder is used, set `SEED_EMULATOR=<path>`; the default is `~/seed-emulator`.
-There is nothing to put into `~/.bashrc`: the scripts set `PYTHONPATH` themselves.
-
-### 11. This repository
-
-The folder must be exactly `~/cardano-seed-testnet`: some scripts rely on it.
+### 13. The rest (no sudo)
 
 ```
-git clone https://github.com/vaizan4ikys/cardano-seed-testnet ~/cardano-seed-testnet
 cd ~/cardano-seed-testnet
+./install.sh
 ```
 
-*You should see:* `ls` lists `README.md`, `run.sh`, `scripts`, `experiments`, `docs` ...
-
-### 12. Check what is missing
-
-```
-./scripts/install-tools.sh --check
-```
-
-*You should see:* a list with one line per check, each `PASS` or `FAIL`: docker usable without sudo, docker compose, python3, git, curl, jq,
-openssl, rsync, seed-emulator importable, disk (at least 15 GB free), RAM (at least 3.5 GB), repo location, Aiken, Kupo.
-At this point only the lines for the **seed-emulator import** ("cannot be imported", the Python packages are not installed yet), **Aiken** and **Kupo** may be `FAIL`;
-the next step fixes them. For any other `FAIL` the script prints what to do (for a missing package it prints the `apt` command; it never installs system packages itself).
-
-### 13. Python environment, Aiken and Kupo
-
-```
-./scripts/install-tools.sh
-```
-
-It repeats the checks, then (all without `sudo`):
-
-* creates the Python virtual environment `~/seed-venv` and installs the pinned packages of SEED's `requirements.txt` into it (web3 5.31.1 and others, about 70 MB);
-  `fresh.sh`, `demo.sh` and `run.sh` use `~/seed-venv/bin/python3` automatically when it exists (another Python: `SEED_PYTHON=/path/to/python3`);
-* downloads **Aiken v1.1.24** (compiler of the smart contract, with its published checksum) and **Kupo v2.12.0** (the indexer) for your CPU type into `~/tools`;
-* runs `aiken check` once, which downloads the Aiken standard library (needs github.com).
-
-*You should see:* at the end `Checking again ...`, all lines `PASS` and `ALL PASS`. Check with `ls ~/tools`: `aiken-1.1.24  kupo-2.12.0`.
-On the test VM (arm64, Ubuntu 20.04) this took 40 seconds. The end of the output looks like this:
-
-```
-  creating the Python environment /home/<user>/seed-venv and installing /home/<user>/seed-emulator/requirements.txt (takes about 1-2 minutes) ...
-  Python environment ready: /home/<user>/seed-venv (Python 3.8.10)
-
-Checking again ...
-  PASS  seed-emulator can be imported (from /home/<user>/seed-emulator, Python: /home/<user>/seed-venv/bin/python3)
-  PASS  Aiken: /home/<user>/tools/aiken-1.1.24/aiken-aarch64-unknown-linux-musl/aiken (aiken v1.1.24+bacbeb3)
-  PASS  Kupo: /home/<user>/tools/kupo-2.12.0/bin/kupo (v2.12.0+491918)
-
-ALL PASS
-```
-
-On an amd64 PC the Aiken folder is `aiken-x86_64-unknown-linux-musl` (not tested).
-If `pip` fails because a compiler or `Python.h` is missing, the script says so: `sudo apt install -y python3-dev build-essential` (step 6), then run it again.
+It clones the SEED Emulator (by hand it would be `git clone --branch v1.1 https://github.com/seed-labs/seed-emulator ~/seed-emulator`;
+a release is a fixed version, git calls that "detached HEAD", which is normal), creates `~/seed-venv`, downloads Aiken and Kupo,
+and ends with `ALL PASS`.
 
 ## Part D. Build the chain and rehearse (in the VM)
 
@@ -269,7 +282,7 @@ On the test VM (2 CPUs, 4 GB RAM) it took **4 minutes 25 seconds**, including th
 **The first time on a new VM it takes longer** than that: the image `seedemu-cardano:local` does not exist yet, so `run.sh` builds it first
 (`docker build` of `image/Dockerfile`, which downloads the Cardano node image `ghcr.io/intersectmbo/cardano-node:11.1.3` and the SEED base image). This build was **not tested** by us
 (our test VM already had the image); expect 5 to 15 more minutes, depending on your internet.
-The first Aiken build also downloads the Aiken standard library from GitHub (already done in step 13).
+The first Aiken build also downloads the Aiken standard library from GitHub (already done by `install.sh` in step 8).
 Do not close the terminal while it runs. If the ssh window might close (laptop sleeps), run it inside `tmux` (`sudo apt install -y tmux`, then `tmux`; we did not use tmux in our test, we used a background job).
 The output of `run.sh` goes to `~/fresh-run.log`; `fresh.sh` itself prints only the steps.
 
@@ -380,10 +393,10 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | Symptom | Cause | What to do |
 |---|---|---|
 | `permission denied while trying to connect to the Docker daemon socket` | your user is not in the `docker` group yet, or you did not log in again | `sudo usermod -aG docker $USER`, then `exit` and log in again; check with `docker run --rm hello-world` |
-| `ModuleNotFoundError: No module named 'seedemu'` | the clone of the SEED Emulator is not in `~/seed-emulator` (the scripts set `PYTHONPATH` themselves) | clone it (step 10), or set the folder: `export SEED_EMULATOR=<folder>`; `./scripts/install-tools.sh --check` shows what is missing |
-| `ModuleNotFoundError: No module named 'web3'` (or `yaml`, `eth_account`, `requests`, `urllib3`, `pkg_resources`, `parsimonious`) | the Python packages of SEED are missing, or you run a different Python than `~/seed-venv`, or you use Ubuntu 24.04 (its Python 3.12 is too new for the pinned packages, see step 2) | `./scripts/install-tools.sh` creates `~/seed-venv`; if `~/seed-venv` is broken, delete it (`rm -rf ~/seed-venv`) and run the script again; on 24.04 install Ubuntu 22.04 instead |
+| `ModuleNotFoundError: No module named 'seedemu'` | the clone of the SEED Emulator is not in `~/seed-emulator` (the scripts set `PYTHONPATH` themselves) | `./install.sh` clones it (step 8), or set the folder: `export SEED_EMULATOR=<folder>`; `./install.sh --check` shows what is missing |
+| `ModuleNotFoundError: No module named 'web3'` (or `yaml`, `eth_account`, `requests`, `urllib3`, `pkg_resources`, `parsimonious`) | the Python packages of SEED are missing, or you run a different Python than `~/seed-venv`, or you use Ubuntu 24.04 (its Python 3.12 is too new for the pinned packages, see step 2) | `./install.sh` creates `~/seed-venv`; if `~/seed-venv` is broken, delete it (`rm -rf ~/seed-venv`) and run the script again; on 24.04 install Ubuntu 22.04 instead |
 | `sudo apt update`: `The repository 'file:/cdrom ... Release' no longer has a Release file` | the Ubuntu installer added the install ISO ("cdrom") as a package source; the ISO is not attached any more | `sudo sed -i '/cdrom/s/^deb/# deb/' /etc/apt/sources.list`, then `sudo apt update` again. If `apt install` then says `Unable to locate package`, the installer had no internet and wrote no online sources: check `grep -v '^#' /etc/apt/sources.list` |
-| `install-tools.sh --check`: `free disk: ... needed: 15 GB`, although the VM disk is big enough | Ubuntu's installer gave `/` only part of the disk (default LVM layout; `lsblk` shows `ubuntu--vg-ubuntu--lv` smaller than its partition) | `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`, then `df -h /` |
+| `install.sh --check`: `free disk: ... needed: 15 GB`, although the VM disk is big enough | Ubuntu's installer gave `/` only part of the disk (default LVM layout; `lsblk` shows `ubuntu--vg-ubuntu--lv` smaller than its partition) | `sudo lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`, then `df -h /` |
 | `fresh.sh` stops with `container files: STILL wrong in: ...` | older version of this repository: the legacy docker builder put files of one container into another container's image | `git pull`, then run `fresh.sh` again (since 19 Nov 2026 `run.sh` prevents it) |
 | `clock is not NTP-synced yet, wait and retry` | the VM clock is not synchronised | `sudo timedatectl set-ntp true`, wait 1 minute, `timedatectl` must show `System clock synchronized: yes` |
 | `fresh.sh` or the preflight says the page port 8088 is busy | an old page server or another program uses the port | `./experiments/demo/demo.sh --step 6`; find the owner with `ss -ltnp \| grep 8088`; or use another port: `PORT=8089 ./experiments/demo/demo.sh` (then use 8089 in the tunnel and in the browser) |
@@ -392,7 +405,7 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | `no space left on device`, or the check says the free disk is too low | VM disk too small | at least 15 GB free in the VM (`df -h /`); free space with `docker system prune` (only when the chain is stopped) or enlarge the VM disk |
 | Containers killed, `Cannot allocate memory`, VM freezes | not enough RAM | give the VM at least 4 GB (6 GB recommended), stop other programs on Windows |
 | `DeadlineExceeded` while building the image | too many parallel builds | `COMPOSE_PARALLEL_LIMIT=2 ./experiments/demo/fresh.sh --yes` |
-| `fresh.sh` fails at the Aiken step ("aiken step failed") | Aiken missing or wrong CPU type in `~/tools`, or no access to github.com (the Aiken standard library is downloaded on the first build) | run `./scripts/install-tools.sh` again; test `curl -sI https://github.com \| head -1`; then run `fresh.sh --yes` again |
+| `fresh.sh` fails at the Aiken step ("aiken step failed") | Aiken missing or wrong CPU type in `~/tools`, or no access to github.com (the Aiken standard library is downloaded on the first build) | run `./install.sh` again; test `curl -sI https://github.com \| head -1`; then run `fresh.sh --yes` again |
 | Preflight: `Kupo not ok` | Kupo is not running, or still catching up with the chain | the hint says: `cd ~/cardano-seed-testnet/experiments/pipeline && ./kupo.sh start` (after a **new** chain: `./kupo.sh wipe` first, then `./kupo.sh start`); `./kupo.sh status` shows `behind: N slots`, wait until N is 30 or less and run `demo.sh --step 0` again |
 | Preflight: `tip not advancing` | the chain stands still (VM was paused or suspended) | `./experiments/demo/fresh.sh --yes` (new chain) |
 | `fresh.sh` waits for blocks and gives up | the first block must come within 900 s of the genesis start; slow machine | run `./experiments/demo/fresh.sh --yes` again; give the VM more CPUs |
@@ -402,12 +415,20 @@ More known problems: [`docs/troubleshooting.md`](troubleshooting.md).
 ## Tested on
 
 Checked on 19 November 2026 by following this guide (from step 6 on, with the differences below) on a test VM: **Ubuntu 20.04.5 arm64, 2 CPUs, 4 GB RAM**, a new user without `sudo` rights.
+That test used the manual system steps (now Part C). The `sudo` question of `install.sh` (step 8) was added later the same day.
+
+A second test the same day, on a **new VM** (VMware Fusion, Ubuntu 20.04.5 arm64, 2 CPUs, 4 GB RAM, 20 GB disk), with the
+system steps typed by hand, found three problems that are fixed now: the `cdrom` error of `apt update` (troubleshooting
+table), only 10 GB of the 20 GB disk given to `/` by Ubuntu's installer (step 4, `install.sh` offers `lvextend`), and docker
+images that got files of other containers on the first build (`fresh.sh` stopped with `container files: STILL wrong`;
+`run.sh` now prevents it). On that VM `install.sh --check`, the answer `N` and a run without a terminal were tested;
+the answer `y` and a full `fresh.sh` with the fix are the next test.
 
 | What | Result |
 |---|---|
-| Steps 6 and 8 (apt packages `docker.io`, `docker-compose-v2`, Python tools) | done with `sudo` by the administrator of the test VM (Docker 26.1.3, Compose 2.27.1); the user `leader` is in the group `docker` |
-| Step 10 (clone and checkout of SEED) | 10 s |
-| Steps 12 and 13 (`install-tools.sh --check`, `install-tools.sh`) | 40 s, `ALL PASS` |
+| System packages (now step 8, or by hand steps 10 and 11): `docker.io`, `docker-compose-v2`, Python tools | done with `sudo` by the administrator of the test VM (Docker 26.1.3, Compose 2.27.1); the user `leader` is in the group `docker` |
+| Clone of SEED (now done by `install.sh`) | 10 s |
+| `install.sh --check`, then `install.sh` (home-folder part) | 40 s, `ALL PASS` |
 | Step 14 (`fresh.sh --dry-run`) | no changes, steps 0 to 10 listed |
 | Step 15 (`fresh.sh --yes`) | 4 min 25 s, preflight all `PASS`; a second run 4 min 28 s |
 | Step 16 (`demo.sh --yes`) | 5 min 15 s, steps 0 to 6 all `PASS` |
@@ -420,7 +441,7 @@ Not tested (be careful, report problems with the step number and the output):
   The whole demo ran on Ubuntu 20.04 only. In a container on Ubuntu 24.04 the same packages do **not** work (see step 2).
   The Ubuntu 22.04 packages `docker.io` (29.1.3) and `docker-compose-v2` (2.40.3) exist in `universe` (checked with `apt-cache policy`) but were not run; the test VM had Docker 26.1.3 and Compose 2.27.1.
 * **The first build of the docker image** `seedemu-cardano:local` (pulls `ghcr.io/intersectmbo/cardano-node:11.1.3` and `handsonsecurity/seedemu-multiarch-base`): the test VM already had the image.
-* Steps 1 to 5 (VirtualBox, Ubuntu installer, Windows ssh), 7 (clock in a VirtualBox VM), 9 (docker group after login) and step 17 (tunnel from Windows) were written from the documentation of VirtualBox and OpenSSH and not run.
+* Steps 1 to 5 (VirtualBox, Ubuntu installer, Windows ssh), 7 (clock in a VirtualBox VM) and step 17 (tunnel from Windows) were written from the documentation of VirtualBox and OpenSSH and not run.
   (The tunnel was tested from a Mac with the same `ssh -L` option.)
 * `git clone` of this repository on the VM: the repository is public and answers without a login (`git ls-remote`), but the test VM got a copy with `rsync`, not a clone.
 * A reboot of the VM, and a run on a machine with only 3 GB RAM or a slow disk.

@@ -22,12 +22,13 @@ The rest of this file is about the chain itself.
 * an NTP-synced clock (`timedatectl` shows `System clock synchronized: yes`; the chain takes its time from it)
 * `git`, `python3`, `python3-venv`, `python3-dev`, `build-essential`, `curl`, `jq`, `openssl`, `rsync`
 * [seed-emulator](https://github.com/seed-labs/seed-emulator) cloned into `~/seed-emulator` and at its release v1.1 (`git clone --branch v1.1 ...`, commit `e26637e`, the tested one); its Python packages
-  go into a virtual environment `~/seed-venv` (`./scripts/install-tools.sh` creates it; `run.sh` finds seed-emulator and that environment by itself)
-* for the demo also Aiken v1.1.24 and Kupo v2.12.0 (`./scripts/install-tools.sh` downloads them into `~/tools`)
+  go into a virtual environment `~/seed-venv` (`./install.sh` creates it; `run.sh` finds seed-emulator and that environment by itself)
+* for the demo also Aiken v1.1.24 and Kupo v2.12.0 (`./install.sh` downloads them into `~/tools`)
   (the full step-by-step guide is [`docs/INSTALL.md`](docs/INSTALL.md))
 * optional: [`age`](https://github.com/FiloSottile/age) for encrypted messages
 
-`./scripts/install-tools.sh --check` checks all of this and prints PASS or FAIL for each item.
+`./install.sh` installs all of this (it shows the few commands that need `sudo` and asks before running them);
+`./install.sh --check` only checks and prints PASS or FAIL for each item.
 
 ## Quick start
 

@@ -7,7 +7,7 @@ Full guide: [`experiments/demo/README.md`](../experiments/demo/README.md). Insta
 
 | # | When | Command |
 |---|---|---|
-| 1 | once, after install | `./scripts/install-tools.sh --check` (every line PASS) |
+| 1 | once, after install | `./install.sh --check` (every line PASS) |
 | 2 | no chain yet, or chain dead | `./experiments/demo/fresh.sh --yes` (new chain + contract + registry, several minutes) |
 | 3 | 10+ minutes before the audience | `./experiments/demo/demo.sh --yes` (rehearsal, no pauses, about 5 min, all PASS) |
 | 4 | the presentation | `./experiments/demo/demo.sh` (press Enter before each step) |

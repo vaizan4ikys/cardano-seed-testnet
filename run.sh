@@ -18,7 +18,8 @@ source "$ROOT/scripts/tools.sh"   # seed_python, SEED_EMULATOR
 # building ~30 images at once can time out (DeadlineExceeded), so build fewer in parallel
 export COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-3}
 
-# Lines starting with ">>> " name the phase; experiments/demo/fresh.sh shows the latest one while run.sh runs.
+# Lines starting with ">>> " name the phase that starts now; experiments/demo/fresh.sh shows the latest one
+# while run.sh runs. Keep that prefix when you add or change a phase.
 
 # the node image is built once; later runs reuse it
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
@@ -40,10 +41,9 @@ echo ">>> genesis files and keys"
 echo ">>> compiling the SEED emulation (cardano.py)"
 "$(seed_python)" "$ROOT/cardano.py"
 
-# Give every service folder its own file time. Why: SEED writes all files within one clock tick, so the files of
-# different services have the same name, size and time, and the legacy builder that "docker compose" uses when the
-# buildx plugin is missing (Ubuntu's docker.io package) then puts one service's file into ANOTHER service's image
-# (19 Nov 2026: 28 of 30 test images got a wrong file; 0 of 30 with one time per folder).
+# Give every service folder its own file time. Why: with one shared time the legacy docker builder (used when the
+# buildx plugin is missing, as with Ubuntu's docker.io) puts one service's file into ANOTHER service's image.
+# The full story is at the top of scripts/check-images.sh.
 "$ROOT/scripts/check-images.sh" --stamp
 
 # bring the containers up

@@ -46,12 +46,16 @@ service_ok() {
 # stamp_folders [SERVICE...]: give each service folder (default: all of them) its own file time, one second apart,
 # counting back from now, so no two services share a file time
 stamp_folders() {
-  local now n=0 dir
+  local now counter=0 services service
   now=$(date +%s)
-  if [ $# -eq 0 ]; then set -- $(cd "$OUTPUT" && ls -d */ | tr -d /); fi
-  for dir in "$@"; do
-    n=$((n + 1))
-    find "$OUTPUT/$dir" -exec touch -h -d "@$((now - n))" {} +
+  if [ $# -gt 0 ]; then
+    services="$*"
+  else
+    services=$(cd "$OUTPUT" && ls -d */ | tr -d /)
+  fi
+  for service in $services; do
+    counter=$((counter + 1))
+    find "$OUTPUT/$service" -exec touch -h -d "@$((now - counter))" {} +
   done
 }
 
@@ -64,6 +68,7 @@ wrong_services() {
   done
 }
 
+# --stamp: only give the folders their file times (run.sh does this before "docker compose up"), then stop
 if [ "${1:-}" = --stamp ]; then
   stamp_folders
   exit 0

@@ -11,7 +11,7 @@
 #     To see it on another computer:
 #       ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>
 #       (VirtualBox NAT with port forwarding: ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1)
-#     The repository must be in ~/cardano-seed-testnet; install the tools first with scripts/install-tools.sh.
+#     The repository must be in ~/cardano-seed-testnet; install the tools first with install.sh.
 #
 # Other settings (environment; the defaults are in the settings block below):
 #   SEED_EMULATOR       folder of seed-emulator on the chain host (default ~/seed-emulator)
@@ -308,7 +308,7 @@ preflight_vm_tools() {
     ok "seed-emulator can be imported (python3, SEED_EMULATOR or ~/seed-emulator)"
   else
     bad "seed-emulator cannot be imported on $HLBL"
-    hint "run ~/$REPO/scripts/install-tools.sh --check on $HLBL" \
+    hint "run ~/$REPO/install.sh --check on $HLBL" \
          "(it says what is missing: the clone of seed-emulator, or the Python environment ~/seed-venv)"
   fi
 }

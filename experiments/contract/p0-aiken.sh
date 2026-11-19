@@ -8,7 +8,7 @@
 # Writes into <outdir>: registry_mint.plutus gateway_write.plutus gateway_withdraw.plutus registry.policy.aiken
 # (cardano-cli script JSON). The registry policy id printed by `aiken blueprint policy` is checked against cardano-cli later.
 # The Aiken program is ~/tools/aiken-1.1.24/aiken-<aarch64|x86_64>-unknown-linux-musl/aiken (the CPU name is detected, see
-# scripts/tools.sh); another path: AIKEN=/path/to/aiken ./p0-aiken.sh ...   scripts/install-tools.sh downloads it.
+# scripts/tools.sh); another path: AIKEN=/path/to/aiken ./p0-aiken.sh ...   install.sh downloads it.
 # The first aiken check downloads the standard library (aiken-lang/stdlib v4.0.0) from github.com: the VM needs internet once.
 set -eu
 SEED_TXID=$1; SEED_INDEX=$2; TOKEN_NAME=$3; OUT=$4
@@ -20,7 +20,7 @@ CONTRACT_DIR=$REPO_DIR/experiments/contract/gateway-registry
 [ -f "$REPO_DIR/scripts/tools.sh" ] \
   || { echo "missing $REPO_DIR/scripts/tools.sh (the repo must be in ~/cardano-seed-testnet)"; exit 1; }
 . "$REPO_DIR/scripts/tools.sh"   # sets AIKEN (CPU-dependent path, or your own AIKEN=...)
-[ -x "$AIKEN" ] || { echo "aiken not found: $AIKEN (run ~/cardano-seed-testnet/scripts/install-tools.sh)"; exit 1; }
+[ -x "$AIKEN" ] || { echo "aiken not found: $AIKEN (run ~/cardano-seed-testnet/install.sh)"; exit 1; }
 
 # ---- 1. + 2. unit tests and build ----
 mkdir -p "$OUT"; cd "$CONTRACT_DIR"

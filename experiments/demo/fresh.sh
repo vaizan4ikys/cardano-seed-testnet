@@ -5,7 +5,7 @@
 #     ssh alias).
 #   local (default on Linux): you are INSIDE the Ubuntu VM (for example a VM on a Windows PC). Everything runs here,
 #     nothing is copied, no ssh, no clock setting. The repository must be in ~/cardano-seed-testnet; install the tools
-#     first with scripts/install-tools.sh.
+#     first with install.sh.
 #     Forcing a mode: CHAIN_HOST=local ./fresh.sh   or   CHAIN_HOST=seedvm ./fresh.sh
 # Other settings (environment):
 #   SEED_EMULATOR       folder of seed-emulator on the chain host (default ~/seed-emulator)
@@ -87,30 +87,32 @@ die() { say "STOP: $*"; exit 1; }
 # minsec SECONDS: prints for example "2 min 05 s"
 minsec() { printf '%d min %02d s' $(($1 / 60)) $(($1 % 60)); }
 
-# with_progress HOSTLOG COMMAND...: run COMMAND; while it runs, print every PROGRESS_EVERY seconds the time so far,
-# the current phase (the last ">>> ..." line that run.sh wrote into HOSTLOG on the chain host) and the last log line.
-# Why: the first run on a new VM downloads and builds the docker images for 15-30 minutes without any other output.
-# Prints COMMAND's own output at the end and returns its exit code.
+# with_progress HOSTLOG COMMAND...: run COMMAND in the background and print a progress line every PROGRESS_EVERY
+# seconds: the time so far, the current phase (the last ">>> ..." line that run.sh wrote into HOSTLOG on the chain
+# host) and the last line of HOSTLOG. Why: the first run on a new VM downloads and builds the docker images for
+# 15-30 minutes without any other output. At the end it prints COMMAND's own output and returns its exit code.
 with_progress() {
-  local hostlog=$1 out pid rc=0 waited=0 phase last
+  local hostlog=$1 outfile pid exit_code=0 seconds=0 phase last_line
   shift
-  out=$(mktemp "${TMPDIR:-/tmp}/fresh-step.XXXXXX")
-  "$@" > "$out" 2>&1 &
+  outfile=$(mktemp "${TMPDIR:-/tmp}/fresh-step.XXXXXX")
+  "$@" > "$outfile" 2>&1 &
   pid=$!
   while kill -0 "$pid" 2> /dev/null; do
     sleep 1
-    waited=$((waited + 1))
-    [ $((waited % PROGRESS_EVERY)) = 0 ] || continue
+    seconds=$((seconds + 1))
+    # a progress line only every PROGRESS_EVERY seconds
+    if [ $((seconds % PROGRESS_EVERY)) != 0 ]; then continue; fi
     phase=$(vm "grep '^>>> ' $hostlog 2> /dev/null | tail -n 1" | cut -c5-100)
-    last=$(vm "tail -n 1 $hostlog 2> /dev/null" | tr -d '\r' | cut -c1-100)
-    [ "$last" = ">>> $phase" ] && last=""
-    say "  ... $(minsec $waited): ${phase:-starting}${last:+   | last line: $last}"
+    last_line=$(vm "tail -n 1 $hostlog 2> /dev/null" | tr -d '\r' | cut -c1-100)
+    # when the last line IS the phase line, do not show it twice
+    if [ "$last_line" = ">>> $phase" ]; then last_line=""; fi
+    say "  ... $(minsec $seconds): ${phase:-starting}${last_line:+   | last line: $last_line}"
   done
-  wait "$pid" || rc=$?
-  cat "$out"
-  rm -f "$out"
-  say "  (took $(minsec $waited))"
-  return $rc
+  wait "$pid" || exit_code=$?
+  cat "$outfile"
+  rm -f "$outfile"
+  say "  (took $(minsec $seconds))"
+  return $exit_code
 }
 
 # The name of pool 1's container on the chain host (empty when it is not running).
@@ -165,13 +167,13 @@ else
         hint: sudo usermod -aG docker \$USER, then log out and in again (or reboot);" \
       "is the docker service running? sudo systemctl enable --now docker"
   vm "PYTHONPATH=$SEEDPATH $SEEDPY -c 'import seedemu'" || die "seed-emulator cannot be imported on $HLBL
-        hint: run ~/$REPO/scripts/install-tools.sh --check on $HLBL" \
+        hint: run ~/$REPO/install.sh --check on $HLBL" \
       "(it says what is missing: the clone of seed-emulator, or ~/seed-venv)"
   vm "cd ~/$REPO && . scripts/tools.sh && [ \"\$TOOLS_ARCH\" != unknown ]" \
     || die "unknown CPU type on $HLBL (uname -m must be aarch64/arm64 or x86_64/amd64)"
   vm "cd ~/$REPO && . scripts/tools.sh && test -x \"\$AIKEN\" && test -f \"\$KUPO_BIN\"" \
     || die "aiken or kupo binary missing on $HLBL
-        hint: run ~/$REPO/scripts/install-tools.sh on $HLBL (or set AIKEN / KUPO_BIN)"
+        hint: run ~/$REPO/install.sh on $HLBL (or set AIKEN / KUPO_BIN)"
 fi
 if [ $DRY = 0 ] && [ $YES = 0 ]; then
   say
@@ -220,7 +222,8 @@ step "1. new chain with protocol version 9 (run.sh removes the old chain first; 
 # ======================================================================================================
 RUN_SH_CMD="cd ~/$REPO && PYTHONPATH=$SEEDPATH $RUNENV PV=9 ./run.sh > ~/fresh-run.log 2>&1;"
 RUN_SH_CMD="$RUN_SH_CMD rc=\$?; tail -3 ~/fresh-run.log; exit \$rc"
-say "  The first run on a new machine downloads and builds the docker images: 15-30 minutes. Later runs: about 3 minutes."
+say "  The first run on a new machine downloads and builds the docker images: 15-30 minutes." \
+    "Later runs: about 3 minutes."
 act "$HLBL: ./run.sh (output in ~/fresh-run.log on $HLBL)" with_progress "~/fresh-run.log" vm "$RUN_SH_CMD" \
   || die "run.sh failed (see ~/fresh-run.log on $HLBL)"
 
@@ -242,11 +245,13 @@ else
       [ "${block:-0}" -ge 3 ] 2>/dev/null && { reached=1; break; }
     fi
     tries=$((tries+1))
-    if [ $((tries * 10 % PROGRESS_EVERY)) -lt 10 ]; then
+    # every PROGRESS_EVERY seconds (one try = 10 s) say what we are waiting for
+    waited=$((tries * 10))
+    if [ $((waited % PROGRESS_EVERY)) -lt 10 ]; then
       if [ -z "$CTR" ]; then now="pool 1's container is not running yet"
       elif [ -z "$block" ]; then now="container $CTR is up, its node does not answer yet"
       else now="block $block (needs block 3 in the era Conway)"; fi
-      say "  ... $(minsec $((tries * 10))) of at most 15 min: $now"
+      say "  ... $(minsec $waited) of at most 15 min: $now"
     fi
     sleep 10
   done
