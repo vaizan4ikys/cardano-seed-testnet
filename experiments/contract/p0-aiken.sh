@@ -1,15 +1,20 @@
 #!/bin/bash
-# Runs on the VM HOST (seedvm), not in the container. Phase 0: test, build and parameterise the three Aiken validators.
+# Runs on the VM HOST (seedvm, or your own Ubuntu VM), not in the container. Phase 0: test, build and parameterise the three Aiken validators.
 #   p0-aiken.sh <seed-txid-hex> <seed-index> <token-name-hex> <outdir>
 # 1. aiken check (all unit tests must pass)  2. aiken build
 # 3. registry_mint gets its two parameters: the seed output (OutputReference) and the token name -> the registry policy id
 # 4. gateway_write and gateway_withdraw get the registry policy id and the token name
 # Writes into <outdir>: registry_mint.plutus gateway_write.plutus gateway_withdraw.plutus registry.policy.aiken
 # (cardano-cli script JSON). The registry policy id printed by `aiken blueprint policy` is checked against cardano-cli later.
+# The Aiken program is ~/tools/aiken-1.1.24/aiken-<aarch64|x86_64>-unknown-linux-musl/aiken (the CPU name is detected, see
+# scripts/tools.sh); another path: AIKEN=/path/to/aiken ./p0-aiken.sh ...   scripts/install-tools.sh downloads it.
+# The first aiken check downloads the standard library (aiken-lang/stdlib v4.0.0) from github.com: the VM needs internet once.
 set -eu
 SEEDTX=$1; SEEDIX=$2; NAME=$3; OUT=$4
 [ "$SEEDIX" -lt 24 ] || { echo "seed index must be < 24 for the one-byte CBOR integer used here"; exit 1; }
-AIKEN=$HOME/tools/aiken-1.1.24/aiken-aarch64-unknown-linux-musl/aiken
+[ -f "$HOME/cardano-seed-testnet/scripts/tools.sh" ] || { echo "missing $HOME/cardano-seed-testnet/scripts/tools.sh (the repo must be in ~/cardano-seed-testnet)"; exit 1; }
+. "$HOME/cardano-seed-testnet/scripts/tools.sh"   # sets AIKEN (CPU-dependent path, or your own AIKEN=...)
+[ -x "$AIKEN" ] || { echo "aiken not found: $AIKEN (run ~/cardano-seed-testnet/scripts/install-tools.sh)"; exit 1; }
 P=$HOME/cardano-seed-testnet/experiments/contract/gateway-registry
 mkdir -p "$OUT"; cd "$P"
 CHK=$($AIKEN check 2>&1 | grep -E "Summary" | tail -1); echo "aiken check:$CHK"

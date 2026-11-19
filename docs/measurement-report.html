@@ -662,7 +662,7 @@ footer{padding-top:32px;font-size:13px;color:var(--muted)}
   <div class="glossary">
     <div><b>A new block producer.</b> Register a fourth pool on the running chain, give it stake, and measure the time to its first block and the effect on forks. It takes about two epochs (100 minutes).</div>
     <div><b>A producer at the far end of a relay chain.</b> The realistic setup; the per-hop rule of section 3 should apply to its blocks.</div>
-    <div><b>Smart-contract cost.</b> A transaction with a validator that checks sensor identities, against plain metadata: size, fee and capacity. Needs a validator tool installed.</div>
+    <div><b>Smart-contract cost.</b> Done after this report: see <code>experiments/contract/PHASE3-RESULTS.md</code> (a 100-reading batch is 2,289 bytes with the gateway-registry contract against 1,264 bytes as plain metadata; a block then holds 28 batches instead of about 51).</div>
     <div><b>Real separate networks.</b> Every result here comes from VMs on one Mac. Machines in different places would show how much of the delay, loss and CPU sharing was an artefact. A packet capture of one block transfer would also confirm the round-trip explanation of section 2.</div>
     <div><b>Failures in between.</b> Cuts of 8 to 12 minutes, to find where healing stops, and repeats of the catch-up times.</div>
   </div>

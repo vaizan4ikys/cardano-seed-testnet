@@ -1,14 +1,19 @@
-# pipeline (phase 1: sensors -> gateway)
+# pipeline: sensors -> gateway -> chain -> Kupo -> web page
 
-The layout of the data that a gateway writes into one Cardano transaction, and how big it is.
-Code: `layout.py` (layout, hash, size rules), `calc_size.py` (the size table below). Not yet run on the chain.
+Simulated sensors (`sensor.py`) send readings to a gateway (`gateway.py`), which writes them in batches into Cardano transactions
+through the gateway-registry contract (`submit_contract.sh`). `kupo.sh` runs the Kupo indexer, `reader.py` and `server.py` read the chain
+back through Kupo, and `page.html` shows it. The whole thing is started and shown by [`../demo/`](../demo/README.md).
+
+* [The layout of the data](#cardano-metadata-rules-that-shape-the-layout) a gateway writes into one transaction, and how big it is.
+  Code: `layout.py` (layout, hash, size rules), `calc_size.py` (the size table below).
+* [The web page](#the-web-page) and its server.
 
 ## Cardano metadata rules that shape the layout
 
 * Values: integers, byte strings, text strings, lists, maps. No decimal numbers (a scaled integer is used:
   2450 with scale 100 = 24.50). No true/false/null.
-* One text string: at most 64 bytes. One transaction: at most 16384 bytes (mainnet value; the private chain may
-  have another `maxTxSize`, not checked).
+* One text string: at most 64 bytes. One transaction: at most 16384 bytes (mainnet value; the spec of the private chain
+  sets the same, see `../../spec/README.md`).
 * `cardano-cli ... --metadata-json-file` with the default "no schema" conversion: JSON integers become
   integers, JSON strings become text, lists stay lists. (From memory: in that mode a string that starts with
   `0x` followed by hex turns into a byte string. No string of this layout looks like that.)
@@ -93,7 +98,7 @@ bytes in total with about 95 bytes of metadata).
   per reading, so only about 130 readings per transaction. The earlier B=100 tests were close to that limit.
 * 64-byte string limit: the longest string in this layout is the sensor id (at most 32 bytes), so it never binds.
   It would matter only if many readings were packed into one long text or byte string.
-* The real `maxTxSize` of the private chain was not checked.
+* The `maxTxSize` of the private chain is set to 16384 in `../../spec/shelley-spec.json`; the gateway splits a batch if the estimate goes above it.
 
 ## Recommended default B = 100 (and T = 30 s)
 
@@ -104,3 +109,37 @@ limit. The fixed part of a transaction (about 300 or 1230 bytes) is 3 to 12 byte
 reading. The price of a bigger B is a longer batch-fill wait (B divided by the readings per second of the
 site). B=100 is also the value of the earlier load tests, so the results stay comparable. The gateway splits a batch
 automatically if the estimate ever exceeds the limit.
+
+## The web page
+
+`server.py` serves `page.html` and the data as JSON. It keeps everything in memory and rebuilds it from Kupo at start (no database of its own).
+A reader thread asks Kupo for new batches about every 2 s; a second thread asks the node for its tip every 2 s; a third reads the registry every 3 s.
+
+```
+python3 server.py --port 8088 --kupo http://<pool-1 container ip>:1442     # page on 127.0.0.1:8088; all options: --help
+```
+
+The server listens on `127.0.0.1` only (no login, no TLS): reach it from another machine through an ssh tunnel
+(`ssh -L 8088:127.0.0.1:8088 <user>@<vm>`), then open <http://127.0.0.1:8088>. `GET /api/state` gives the data, `GET /health` a short status.
+In normal use `../demo/demo.sh` starts it with the right options.
+
+The page has a header and three tabs:
+
+* **Header:** *Sensors live* (sensors that are not silent, out of all seen), *Readings stored permanently* (readings in batches that are final), *Approved gateways*
+  (named gateways that are on the registry list, out of the named gateways), and the connection to the chain with the tip block.
+* **Sensors:** one card per sensor and kind, grouped by gateway; the gateway has an Approved / Not approved badge. A card shows the latest value, a small curve and
+  **Live**, **Silent** or **Out of range**. Click a card for a graph with lowest, average and highest value and the value under the mouse.
+* **Trust:** *Who may send data?* is a table of the gateways with Approved / Not approved, batches and readings stored, time of the last data.
+  *Is the stored data safe?* counts batches that are final, settling (in a block, fewer than `--final-depth` blocks on top) and rolled back, and lists the latest batches.
+  The **Verify** button of a batch shows the transaction id, the block and depth, the fingerprint of the data (the batch hash from above), the signer and what this proves.
+* **Details:** chain tip, Kupo status, server time, counts, size of the registry list; technical tables of the latest batches (depth bars, warnings such as "identity mismatch") and of the gateways (addresses, receipts).
+
+**Approved or not is read from the chain.** The registry (the list of approved gateway keys) is one coin at the administrator address that holds the registry token, with the list as its inline datum.
+The server finds that coin through Kupo (`/matches/<admin address>?unspent`, then `/datums/<hash>`), turns the list into key hashes and compares them with the key hash of each
+gateway's wallet address (`reader.Registry`). So the page shows a revoke or an enrol a few seconds after the transaction is in a block. If the list cannot be read, the badge says
+"list unknown" and the Trust tab shows the error.
+
+The server option `--registry-dir DIR` (default `/tmp/p0n`) is the directory **inside pool 1's container** with `admin.addr`, `policy.id` and `token.hex`
+(they are written by `../contract/in-container/p0-admin.sh` and `p0-registry.sh`; the server reads them with `docker exec`). `--registry-dir none` switches the registry reading off:
+all badges then say "list unknown". Other options that matter: `--final-depth` (blocks until final, default 60), `--silent-after` (seconds until a sensor is silent, default 90; the demo uses 40),
+`--limits` (out-of-range limits), `--gateways-file` (name to wallet address, default `gateways.json`), `--container`, `--magic`, `--receipt-policy`.

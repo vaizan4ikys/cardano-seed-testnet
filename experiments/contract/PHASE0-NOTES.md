@@ -53,7 +53,7 @@ In cardano-cli 11.2.3 the units flags take `(STEPS,MEMORY)`: steps first.
 * Gateway A, same recipe: accepted, in a block. Size 1,325 bytes, fee 7,882 lovelace.
 * Units measured by the node for A's tx: 23,653,611 steps / 74,016 memory. `transaction build` (client side) gives fee 7,601 because it uses the exact units.
 * Fee rule: `1 * size + 0 + 0.0577 * memory + 0.0000721 * steps` (1325 + 4673.7 + 1881.8 = 7880.5 for the declared units; the tool gives 7,882 because it measures a draft that is 2 bytes longer, so it never under-estimates). Collateral = ceil(1.5 * fee).
-* Size: a script transaction is about 1.3 KB (1,323 to 1,325 bytes); a plain metadata transaction with the same data and no script is only 342 bytes. The difference (about 1 KB) is the script itself (about 690 bytes), the redeemer, the collateral and return-collateral, the reference input and the required signer. A reference script instead of the script in every tx would remove the 690 bytes (not tried).
+* Size: a script transaction is about 1.3 KB (1,323 to 1,325 bytes); a plain metadata transaction with the same data and no script is only 342 bytes. The difference (about 1 KB) is the script itself (about 690 bytes), the redeemer, the collateral and return-collateral, the reference input and the required signer. A reference script instead of the script in every tx would remove the 690 bytes (not tried here; measured later in Phase 3: 1,633 bytes with a reference script against 2,289 with the script inside, for a 100-reading batch, see `PHASE3-RESULTS.md`).
 
 ## Task 2: five chained script transactions (fresh run)
 

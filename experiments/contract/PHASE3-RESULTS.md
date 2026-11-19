@@ -4,7 +4,7 @@ Measured on 13 November 2026 on the private chain net-1 (3 pools, protocol versi
 `PHASE3-PLAN.md` (version 2, reviewed by an independent agent before the run). Data: `phase3/results/steps.csv` (36 load steps +
 1 discarded warm-up) and `phase3/results/costs.csv`. Summary tables: `python3 phase3/p3-summarize.py phase3/results/steps.csv phase3/results/costs.csv`.
 
-Three variants send the same batch (100 readings, 1.3 KB of metadata):
+Three variants send the same batch (100 readings; as a plain metadata transaction it is 1,264 bytes):
 * **P** plain metadata transaction (no contract)
 * **S** contract transaction, script inside the transaction (what the gateway does today)
 * **R** contract transaction, script stored once as a reference script, the transaction points to it

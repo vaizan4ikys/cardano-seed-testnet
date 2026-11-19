@@ -9,7 +9,7 @@ different machines. This is the case of a sensor system: the capacity and the wa
 GATEWAYS=3 TOTALS="100 200" DURATION=60 ./gateways.sh   a short test
 ```
 
-**Not tested yet** (written on 1 November 2026, to be run on a fresh network with the load off).
+Written on 1 November 2026 and run in the following nights (6 and 12 gateways, relays 1-4 hops deep, repeats of the lost-transactions step); the results are in section 6 of [`../../docs/measurement-report.html`](../../docs/measurement-report.html) and in `results/`.
 
 ## What it does
 

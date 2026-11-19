@@ -1,16 +1,24 @@
 #!/bin/bash
 # Leader demo on the private Cardano chain (sensors -> gateways -> contract -> chain -> Kupo -> web page).
-# Runs on the MAC and drives seedvm over ssh. bash 3.2 compatible (macOS).
+# bash 3.2 compatible (macOS). Two modes, chosen by the setting CHAIN_HOST (see host.sh):
+#   Mac -> VM (default on macOS): runs on the MAC and drives the VM "seedvm" over ssh (CHAIN_HOST=seedvm, or another ssh alias);
+#     the Mac looks at the page through an ssh tunnel.
+#   local (default on Linux, CHAIN_HOST=local): you are INSIDE the Ubuntu VM (for example a VM on a Windows PC). Nothing is copied,
+#     no tunnel; the page is at http://127.0.0.1:8088 on the VM itself. To see it on another computer (the Windows PC):
+#     ssh -L 8088:127.0.0.1:8088 <user>@<vm-address>   (VirtualBox NAT with port forwarding: ssh -p 2222 -L 8088:127.0.0.1:8088 <user>@127.0.0.1).
+#     The repository must be in ~/cardano-seed-testnet; install the tools first with scripts/install-tools.sh.
+# Other settings (environment): SEED_EMULATOR (folder of seed-emulator on the chain host, default ~/seed-emulator), PORT, MAGIC,
+#   DEMO_B, DEMO_T, DEMO_SILENT, DEMO_CLOCK_STRICT.
 #
 #   ./demo.sh                 the whole demo, a pause "press Enter" before every step
 #   ./demo.sh --yes           no pauses (rehearsal: tells you with PASS/FAIL whether everything works)
 #   ./demo.sh --step N        only step N (0..6); it starts what it needs and stops it again at the end
 #   ./demo.sh --keep          with --step: do not stop the processes at the end (stop later with --step 6)
-#   ./demo.sh --open          open http://127.0.0.1:8088 in the browser (step 1)
+#   ./demo.sh --open          open http://127.0.0.1:8088 in the browser (step 1; on macOS only, on Linux the address is printed)
 #
-# Steps: 0 preflight  1 page server + tunnel  2 gateway GW01 (enrolled) + 10 sensors  3 gateway GW02 (NOT enrolled)
+# Steps: 0 preflight  1 page server (+ tunnel in Mac mode)  2 gateway GW01 (enrolled) + 10 sensors  3 gateway GW02 (NOT enrolled)
 #        4 revoke GW01, then enrol again  5 one sensor goes silent  6 clean stop
-# Processes on seedvm log to /tmp/demo-logs/<name>.log, outboxes are in /tmp/demo-run-<time>/ (not in the repo).
+# Processes on the chain host log to /tmp/demo-logs/<name>.log, outboxes are in /tmp/demo-run-<time>/ (not in the repo).
 # The registry must end with A enrolled, B not enrolled (also after Ctrl-C: the cleanup repairs it).
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 HERE=$ROOT/experiments/demo
@@ -19,7 +27,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --yes) YES=1;; --open) OPEN=1;; --keep) KEEP=1;;
     --step) shift; ONLY=${1:-};;
-    -h|--help) sed -n '2,15p' "$0"; exit 0;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0;;
     *) echo "unknown option $1 (try --help)"; exit 1;;
   esac; shift
 done
@@ -35,9 +43,11 @@ CTR=""; RUN=""; KUPO_URL=""
 SSHO="-o ConnectTimeout=10 -o ServerAliveInterval=15 -o ControlMaster=auto -o ControlPath=/tmp/demo-cm-%C -o ControlPersist=120"
 TUNNEL_PID=/tmp/demo-tunnel.pid
 URL=http://127.0.0.1:$PORT
+. "$HERE/host.sh"       # CHAIN_HOST, LOCAL, vm(), push(), SEEDPATH
+export CHAIN_HOST
+if [ $LOCAL = 1 ]; then HLBL="this machine"; else HLBL=$CHAIN_HOST; fi
 
 # ---- helpers ----
-vm() { local o rc=0; o=$(ssh -n $SSHO seedvm "$@" 2>&1) || rc=$?; [ -n "$o" ] && { printf '%s\n' "$o" | grep -v -E "post-quantum|vulnerable|upgraded" || true; }; return $rc; }
 vmx() { vm "bash cardano-seed-testnet/experiments/demo/remote.sh $(printf '%q ' "$@")"; }
 ctr() { vm "docker exec -e P0_DIR=/tmp/p0n $CTR $*"; }
 say() { printf '%s\n' "$*"; }
@@ -80,8 +90,9 @@ start_server() {
   vmx start server $VPIPE "python3 -u server.py --port $PORT --silent-after $SILENT --kupo $KUPO_URL" | tail -1
 }
 start_tunnel() {
+  [ $LOCAL = 1 ] && return 0          # local mode: the page is on this machine, no tunnel
   if [ -f $TUNNEL_PID ] && kill -0 "$(cat $TUNNEL_PID)" 2>/dev/null; then return 0; fi
-  ssh -o ControlPath=none -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L $PORT:127.0.0.1:$PORT seedvm < /dev/null > /tmp/demo-tunnel.log 2>&1 &
+  ssh -o ControlPath=none -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L $PORT:127.0.0.1:$PORT $CHAIN_HOST < /dev/null > /tmp/demo-tunnel.log 2>&1 &
   echo $! > $TUNNEL_PID
 }
 stop_tunnel() { [ -f $TUNNEL_PID ] && { kill "$(cat $TUNNEL_PID)" 2>/dev/null; rm -f $TUNNEL_PID; }; return 0; }
@@ -112,7 +123,7 @@ cleanup() {
   stop_tunnel
   return 0
 }
-close_master() { ssh $SSHO -O exit seedvm > /dev/null 2>&1; return 0; }
+close_master() { [ $LOCAL = 1 ] && return 0; ssh $SSHO -O exit $CHAIN_HOST > /dev/null 2>&1; return 0; }
 on_exit() { if [ $KEEP = 1 ] && [ $INTERRUPTED = 0 ]; then [ $REVOKED = 1 ] && restore_registry; else cleanup; fi; close_master; }
 on_int() { INTERRUPTED=1; say; say "interrupted"; cleanup; close_master; trap - EXIT; exit 130; }
 trap on_exit EXIT
@@ -123,7 +134,7 @@ RES0=-; RES1=-; RES2=-; RES3=-; RES4=-; RES5=-; RES6=-
 TM0=0; TM1=0; TM2=0; TM3=0; TM4=0; TM5=0; TM6=0
 begin() { FAILS=0; NCHK=0; S0=$SECONDS; }
 finish() { local r=PASS; [ $FAILS -gt 0 ] && r="FAIL($FAILS)"; eval "RES$1=\$r; TM$1=\$((SECONDS - S0))"; say; say "  step $1: $r, $((SECONDS - S0)) s"; }
-sync_demo() { rsync -a -e "ssh $SSHO" "$HERE/" seedvm:cardano-seed-testnet/experiments/demo/ 2>&1 | grep -v -E "post-quantum|vulnerable|upgraded"; return 0; }
+sync_demo() { push "$HERE/" cardano-seed-testnet/experiments/demo/; }
 need_basics() {   # for --step N without step 0: find the container, run dir, Kupo URL
   sync_demo
   [ -n "$CTR" ] || CTR=$(vmx ctr | tail -1)
@@ -139,17 +150,28 @@ step0() {
           "Look for: only PASS lines. On a FAIL the demo stops and says what to do."
   pause; begin
   local f
-  # Mac disk
-  f=$(df -k / | awk 'NR==2 {print int($4/1048576)}')
-  [ "${f:-0}" -ge 6 ] && ok "Mac disk free: ${f} GB" || { bad "Mac disk free only ${f} GB (< 6)"; hint "free some space"; }
-  # ssh
-  if vm "true"; then ok "ssh to seedvm works"; else bad "cannot ssh to seedvm"; hint "is the VM running? try: ssh seedvm"; finish 0; return 1; fi
+  if [ $LOCAL = 1 ]; then
+    # local mode: the repository must be in ~/cardano-seed-testnet (the commands use paths relative to $HOME)
+    if local_repo_ok "$ROOT"; then ok "repository is in ~/cardano-seed-testnet"
+    else bad "the repository is in $ROOT, not in ~/cardano-seed-testnet"; hint "git clone https://github.com/vaizan4ikys/cardano-seed-testnet ~/cardano-seed-testnet   or   ln -s $ROOT ~/cardano-seed-testnet"; finish 0; return 1; fi
+  else
+    # Mac disk
+    f=$(df -k / | awk 'NR==2 {print int($4/1048576)}')
+    [ "${f:-0}" -ge 6 ] && ok "Mac disk free: ${f} GB" || { bad "Mac disk free only ${f} GB (< 6)"; hint "free some space"; }
+    # ssh
+    if vm "true"; then ok "ssh to $CHAIN_HOST works"; else bad "cannot ssh to $CHAIN_HOST"; hint "is the VM running? try: ssh $CHAIN_HOST"; finish 0; return 1; fi
+  fi
   f=$(vm "df -BG --output=avail / | tail -1 | tr -dc 0-9")
-  [ "${f:-0}" -ge 6 ] && ok "VM disk free: ${f} GB" || { bad "VM disk free only ${f:-?} GB (< 6)"; hint "clean up on seedvm (docker system prune, old logs)"; }
+  [ "${f:-0}" -ge 6 ] && ok "VM disk free: ${f} GB" || { bad "VM disk free only ${f:-?} GB (< 6)"; hint "clean up on $HLBL (docker system prune, old logs)"; }
+  # docker and seed-emulator on the chain host
+  if vm "docker info > /dev/null 2>&1"; then ok "docker works for the user on $HLBL"
+  else bad "docker does not work for the user on $HLBL"; hint "sudo usermod -aG docker \$USER, then log out and in again; is the service running? sudo systemctl enable --now docker"; finish 0; return 1; fi
+  if vm "PYTHONPATH=$SEEDPATH $SEEDPY -c 'import seedemu' > /dev/null 2>&1"; then ok "seed-emulator can be imported (python3, SEED_EMULATOR or ~/seed-emulator)"
+  else bad "seed-emulator cannot be imported on $HLBL"; hint "run ~/cardano-seed-testnet/scripts/install-tools.sh --check on $HLBL (it says what is missing: the clone of seed-emulator, or the Python environment ~/seed-venv)"; fi
   sync_demo
   # container
   CTR=$(vmx ctr | tail -1)
-  if [ -n "$CTR" ]; then ok "pool 1 container up: $CTR"; else bad "pool 1 container not running"; hint "start the chain: fresh.sh, or on seedvm: ./run.sh"; finish 0; return 1; fi
+  if [ -n "$CTR" ]; then ok "pool 1 container up: $CTR"; else bad "pool 1 container not running"; hint "start the chain: fresh.sh, or on $HLBL: ./run.sh"; finish 0; return 1; fi
   # tip advancing
   local t1 t2
   t1=$(vmx tip | tail -1); t2=$t1
@@ -162,23 +184,26 @@ step0() {
   ks=$(vm "cd $VPIPE && ./kupo.sh status")
   b=$(printf '%s\n' "$ks" | sed -n 's/.*behind: *\(-\{0,1\}[0-9]*\) slots.*/\1/p' | tail -1)
   if [ -n "$b" ] && [ "$b" -le 30 ]; then ok "Kupo running and caught up (behind $b slots) at $KUPO_URL"
-  else bad "Kupo not ok: $(printf '%s\n' "$ks" | tr '\n' ' ' | cut -c1-160)"; hint "on seedvm: cd $VPIPE && ./kupo.sh start   (after a fresh chain: ./kupo.sh wipe first)"; fi
+  else bad "Kupo not ok: $(printf '%s\n' "$ks" | tr '\n' ' ' | cut -c1-160)"; hint "on $HLBL: cd $VPIPE && ./kupo.sh start   (after a fresh chain: ./kupo.sh wipe first)"; fi
   # clocks: (1) the VM clock and the chain agree (syncProgress of the node), (2) VM clock against the Mac clock
   local sp; sp=$(echo "$t2" | awk '{print $3}')
   if [ -n "$sp" ] && python3 -c "import sys; sys.exit(0 if float('$sp') >= 99.9 else 1)" 2>/dev/null; then ok "VM clock agrees with the chain time (node sync progress $sp %)"
   else bad "node sync progress is ${sp:-?} % (VM clock and chain time disagree)"; hint "the chain needs a restart after a clock jump: fresh.sh (new chain)"; fi
   local m0 v m1 d
+  if [ $LOCAL = 1 ]; then ok "local mode: one machine, one clock"
+  else
   m0=$(python3 -c 'import time; print(time.time())'); v=$(vm "date +%s.%N"); m1=$(python3 -c 'import time; print(time.time())')
   d=$(python3 -c "print(round($v - ($m0 + $m1) / 2, 1))" 2>/dev/null)
   if [ -n "$d" ] && python3 -c "import sys; sys.exit(0 if abs($d) < 3 else 1)"; then ok "VM clock differs from the Mac clock by $d s"
-  elif [ "${DEMO_CLOCK_STRICT:-0}" = 1 ]; then bad "VM clock differs from the Mac clock by ${d:-?} s (> 3 s)"; hint "on seedvm: sudo timedatectl set-ntp true (this jumps the clock: the chain must be restarted afterwards)"
+  elif [ "${DEMO_CLOCK_STRICT:-0}" = 1 ]; then bad "VM clock differs from the Mac clock by ${d:-?} s (> 3 s)"; hint "on $CHAIN_HOST: sudo timedatectl set-ntp true (this jumps the clock: the chain must be restarted afterwards)"
   else say "  WARN  VM clock differs from the Mac clock by ${d:-?} s (VM minus Mac). Not blocking: sensors, gateways, node and page all use the VM clock;"
        say "        times seen on the page are VM times. (DEMO_CLOCK_STRICT=1 makes this a FAIL.)"; fi
-  # sync + scripts in the container
-  say "  (copying the pipeline, contract and demo scripts to seedvm and into the container)"
-  rsync -a -e "ssh $SSHO" --exclude __pycache__ --exclude 'outbox*' "$ROOT/experiments/pipeline/" seedvm:$VPIPE/ 2>&1 | grep -v -E "post-quantum|vulnerable|upgraded"
-  rsync -a -e "ssh $SSHO" "$ROOT/experiments/contract/in-container/" seedvm:cardano-seed-testnet/experiments/contract/in-container/ 2>&1 | grep -v -E "post-quantum|vulnerable|upgraded"
-  rsync -a -e "ssh $SSHO" "$HERE/" seedvm:cardano-seed-testnet/experiments/demo/ 2>&1 | grep -v -E "post-quantum|vulnerable|upgraded"
+  fi
+  # sync + scripts in the container (local mode: the files are already in place, push does nothing)
+  [ $LOCAL = 1 ] || say "  (copying the pipeline, contract and demo scripts to $CHAIN_HOST and into the container)"
+  push "$ROOT/experiments/pipeline/" "$VPIPE/" --exclude __pycache__ --exclude 'outbox*'
+  push "$ROOT/experiments/contract/in-container/" cardano-seed-testnet/experiments/contract/in-container/
+  push "$HERE/" cardano-seed-testnet/experiments/demo/
   vm "cd cardano-seed-testnet/experiments && docker cp contract/in-container/. $CTR:/tmp/p0-scripts/ && docker cp demo/in-container/p1-list.sh $CTR:/tmp/p0-scripts/p1-list.sh" > /dev/null
   local miss
   miss=$(ctr "bash -c 'cd /tmp/p0n && for f in /tmp/p0-scripts/p0-lib.sh /tmp/p0-scripts/p1-batch.sh /tmp/p0-scripts/p1-enroll.sh /tmp/p0-scripts/p1-revoke.sh /tmp/p0-scripts/p1-list.sh gateway_write.plutus registry.ref policy.id token.hex admin.skey gwA.skey gwB.skey; do [ -f \$f ] || echo \$f; done'")
@@ -188,7 +213,7 @@ step0() {
   r=$(ctr bash /tmp/p0-scripts/p1-list.sh $MAGIC | tail -1)
   case "$r" in
     *"A=enrolled B=not-enrolled"*) ok "registry list: A enrolled, B not enrolled ($r)";;
-    *) bad "registry list is wrong: $r"; hint "enrol A:  ssh seedvm \"docker exec -e P0_DIR=/tmp/p0n $CTR bash /tmp/p0-scripts/p1-enroll.sh $MAGIC A\"   revoke B: same with p1-revoke.sh ... B";;
+    *) bad "registry list is wrong: $r"; hint "enrol A, on $HLBL:  docker exec -e P0_DIR=/tmp/p0n $CTR bash /tmp/p0-scripts/p1-enroll.sh $MAGIC A     revoke B: same with p1-revoke.sh ... B";;
   esac
   # gateways.json against the real wallets
   local ga gb
@@ -198,11 +223,12 @@ step0() {
   # leftovers and ports
   local lo p8 p1 p2
   lo=$(vmx leftovers)
-  [ -z "$lo" ] && ok "no leftover demo processes on seedvm" || { bad "leftover processes: $(echo "$lo" | head -3 | tr '\n' ';' | cut -c1-200)"; hint "./demo.sh --step 6 (clean stop), or kill them by hand"; }
+  [ -z "$lo" ] && ok "no leftover demo processes on $HLBL" || { bad "leftover processes: $(echo "$lo" | head -3 | tr '\n' ';' | cut -c1-200)"; hint "./demo.sh --step 6 (clean stop), or kill them by hand"; }
   p8=$(vmx portfree $PORT | tail -1); p1=$(vmx portfree $GWA_PORT | tail -1); p2=$(vmx portfree $GWB_PORT | tail -1)
-  if [ "$p8" = free ] && [ "$p1" = free ] && [ "$p2" = free ]; then ok "ports $PORT, $GWA_PORT, $GWB_PORT are free on seedvm"
-  else bad "a port is busy on seedvm (page $p8, gateway A $p1, gateway B $p2)"; hint "find the owner: ssh seedvm 'ss -ltnp | grep -E \"$PORT|$GWA_PORT|$GWB_PORT\"'; set another page port with PORT=8089 ./demo.sh"; fi
-  if (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null && [ ! -f $TUNNEL_PID ]; then bad "port $PORT is busy on the Mac (an old tunnel?)"; hint "lsof -i :$PORT ; kill the old ssh -L"
+  if [ "$p8" = free ] && [ "$p1" = free ] && [ "$p2" = free ]; then ok "ports $PORT, $GWA_PORT, $GWB_PORT are free on $HLBL"
+  else bad "a port is busy on $HLBL (page $p8, gateway A $p1, gateway B $p2)"; hint "find the owner, on $HLBL: ss -ltnp | grep -E \"$PORT|$GWA_PORT|$GWB_PORT\" ; set another page port with PORT=8089 ./demo.sh"; fi
+  if [ $LOCAL = 1 ]; then :   # the port check above already looked at this machine
+  elif (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null && [ ! -f $TUNNEL_PID ]; then bad "port $PORT is busy on the Mac (an old tunnel?)"; hint "lsof -i :$PORT ; kill the old ssh -L"
   else ok "port $PORT is free on the Mac"; fi
   finish 0
   [ $FAILS -eq 0 ]
@@ -210,7 +236,7 @@ step0() {
 
 ############################################################ step 1
 step1() {
-  hr "STEP 1: start the page server on seedvm and the ssh tunnel"
+  if [ $LOCAL = 1 ]; then hr "STEP 1: start the page server on this machine"; else hr "STEP 1: start the page server on $CHAIN_HOST and the ssh tunnel"; fi
   explain "The page server reads the chain through Kupo (it keeps nothing of its own) and shows sensors, batches and gateways." \
           "Look for: the page opens at $URL; it shows the chain tip moving and Kupo 'ok'." \
           "Old sensor values from earlier runs may be on it: they go 'silent' after $SILENT s, that is normal."
@@ -218,13 +244,16 @@ step1() {
   need_basics; ensure_run
   say "  $(start_server)"; STARTED=1
   start_tunnel
-  if wait_for 40 kupo_ok 'echo waiting for the page'; then ok "page answers through the tunnel; Kupo ok"
-  else bad "page did not answer at $URL within 40 s"; hint "see /tmp/demo-logs/server.log on seedvm, /tmp/demo-tunnel.log on the Mac; port busy: PORT=8089 ./demo.sh"; fi
+  if wait_for 40 kupo_ok 'echo waiting for the page'; then ok "page answers$([ $LOCAL = 0 ] && echo ' through the tunnel'); Kupo ok"
+  else bad "page did not answer at $URL within 40 s"; hint "see /tmp/demo-logs/server.log on $HLBL$([ $LOCAL = 0 ] && echo ', /tmp/demo-tunnel.log on the Mac'); port busy: PORT=8089 ./demo.sh"; fi
   local tb; tb=$(st "s['tip']['block']")
   [ -n "$tb" ] && ok "page shows the chain tip: block $tb" || bad "page has no tip"
-  say "  run directory on seedvm: $RUN"
+  say "  run directory on $HLBL: $RUN"
   say "  >>> open $URL in the browser <<<"
-  [ $OPEN = 1 ] && open "$URL"
+  [ $LOCAL = 1 ] && say "  (another computer: ssh -L $PORT:127.0.0.1:$PORT <user>@<vm-address>; VirtualBox NAT with port forwarding: ssh -p 2222 -L $PORT:127.0.0.1:$PORT <user>@127.0.0.1)"
+  if [ $OPEN = 1 ]; then
+    if [ "$(uname -s)" = Darwin ]; then open "$URL"; else say "  (--open opens a browser on macOS only; open the address by hand)"; fi
+  fi
   finish 1
   [ $FAILS -eq 0 ]
 }
@@ -363,15 +392,15 @@ step5() {
 step6() {
   hr "STEP 6: clean stop"
   explain "Sensors, gateways (they write out the last batch first), the page server and the tunnel are stopped." \
-          "The registry stays as it was at the start: A enrolled, B not. Logs and outboxes stay in /tmp/demo-logs and $RUN on seedvm."
+          "The registry stays as it was at the start: A enrolled, B not. Logs and outboxes stay in /tmp/demo-logs and $RUN on $HLBL."
   pause; begin
   need_basics
   CLEANED=0; cleanup
   local lo r
-  lo=$(vmx leftovers); [ -z "$lo" ] && ok "no demo processes left on seedvm" || bad "left: $(echo "$lo" | head -3 | tr '\n' ';')"
+  lo=$(vmx leftovers); [ -z "$lo" ] && ok "no demo processes left on $HLBL" || bad "left: $(echo "$lo" | head -3 | tr '\n' ';')"
   [ "$(vmx list | wc -l | tr -d ' ')" = 0 ] && ok "pid file empty" || bad "pid file not empty"
-  if curl -s -m 3 -o /dev/null "$URL/health"; then bad "tunnel/page still answers at $URL"; else ok "tunnel closed, page not reachable"; fi
-  if (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then bad "port $PORT still open on the Mac"; else ok "port $PORT closed on the Mac"; fi
+  if curl -s -m 3 -o /dev/null "$URL/health"; then bad "page$([ $LOCAL = 0 ] && echo '/tunnel') still answers at $URL"; else ok "page not reachable$([ $LOCAL = 0 ] && echo ', tunnel closed')"; fi
+  if (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null; then bad "port $PORT still open$([ $LOCAL = 0 ] && echo ' on the Mac')"; else ok "port $PORT closed$([ $LOCAL = 0 ] && echo ' on the Mac')"; fi
   r=$(ctr bash /tmp/p0-scripts/p1-list.sh $MAGIC | tail -1)
   case "$r" in *"A=enrolled B=not-enrolled"*) ok "registry: A enrolled, B not enrolled";; *) bad "registry not in the start state: $r";; esac
   finish 6

@@ -10,6 +10,7 @@
 # Check it with ./scripts/check.sh, stop it with ./stop.sh.
 set -euo pipefail
 source "$(dirname "$0")/scripts/lib.sh"
+source "$ROOT/scripts/tools.sh"   # seed_python, SEED_EMULATOR
 
 # building ~30 images at once can time out (DeadlineExceeded), so build fewer in parallel
 export COMPOSE_PARALLEL_LIMIT=${COMPOSE_PARALLEL_LIMIT:-3}
@@ -21,7 +22,9 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -t "$IMAGE" "$ROOT
 rm -rf "$SENT"   # messages sent to the old chain: their txids do not exist on the new one
 
 "$ROOT/scripts/gen-testnet.sh"
-python3 "$ROOT/cardano.py"
+# seedemu is found through PYTHONPATH (default: ~/seed-emulator); the Python is ~/seed-venv's if it exists (see scripts/tools.sh)
+[ -d "$SEED_EMULATOR/seedemu" ] && export PYTHONPATH="$SEED_EMULATOR${PYTHONPATH:+:$PYTHONPATH}"
+"$(seed_python)" "$ROOT/cardano.py"
 
 (cd "$OUTPUT" && docker compose -p "$PROJECT" up -d)
 if [ "${EXPOSE:-}" = 1 ]; then

@@ -7,11 +7,27 @@ autonomous system and talks to the others over the emulated Internet (BGP/OSPF r
 Part of the CyberTel project *Decentralized Sensor Data Management for Critical Applications
 Using Blockchain Technology*: Cardano replaces Ethereum as the ledger.
 
+## Start here
+
+* **Install and run the demo on your own Ubuntu virtual machine** (for example on a Windows PC): [`docs/INSTALL.md`](docs/INSTALL.md).
+  Step by step, from "nothing installed" to the demo in your browser.
+* **Run and present the demo** (sensors, gateway, smart contract, chain, web page): [`experiments/demo/README.md`](experiments/demo/README.md).
+
+The rest of this file is about the chain itself.
+
 ## Requirements
 
-* Linux machine or VM with Docker (+ Compose plugin) and an NTP-synced clock
-* [seed-emulator](https://github.com/seed-labs/seed-emulator) cloned, `export PYTHONPATH=$HOME/seed-emulator`
-* Python 3 and `openssl` (optional: [`age`](https://github.com/FiloSottile/age) for encrypted messages)
+* Linux machine or VM (Ubuntu 22.04 recommended, amd64 or arm64; 20.04 also works; **not 24.04**: its Python 3.12 is too new for SEED's pinned packages) with at least 2 CPUs, 4 GB RAM and 30 GB disk (15 GB free)
+* Docker Engine with the Compose v2 plugin (Ubuntu packages `docker.io` and `docker-compose-v2`), usable without `sudo`
+* an NTP-synced clock (`timedatectl` shows `System clock synchronized: yes`; the chain takes its time from it)
+* `git`, `python3`, `python3-venv`, `python3-dev`, `build-essential`, `curl`, `jq`, `openssl`, `rsync`
+* [seed-emulator](https://github.com/seed-labs/seed-emulator) cloned into `~/seed-emulator` and checked out at commit `e26637e915fb2f83be0b165d3fb731b400db6fe6` (the tested one); its Python packages
+  go into a virtual environment `~/seed-venv` (`./scripts/install-tools.sh` creates it; `run.sh` finds seed-emulator and that environment by itself)
+* for the demo also Aiken v1.1.24 and Kupo v2.12.0 (`./scripts/install-tools.sh` downloads them into `~/tools`)
+  (the full step-by-step guide is [`docs/INSTALL.md`](docs/INSTALL.md))
+* optional: [`age`](https://github.com/FiloSottile/age) for encrypted messages
+
+`./scripts/install-tools.sh --check` checks all of this and prints PASS or FAIL for each item.
 
 ## Quick start
 
@@ -34,10 +50,14 @@ A second, independent network (magic 43) runs next to the first: `NET=2 ./run.sh
 | Folder | Content |
 |---|---|
 | [`scripts/`](scripts/) | check the chain, send transactions and messages, leadership, partition test |
-| [`experiments/`](experiments/) | extra nodes joining a running network, on the same or on another machine |
+| [`experiments/`](experiments/) | extra nodes joining a running network, measurements, load tests (list in its README) |
+| [`experiments/demo/`](experiments/demo/) | the leader demo: `fresh.sh` (new chain + contract + registry), `demo.sh` (rehearsal and presentation); presenter's guide |
+| [`experiments/pipeline/`](experiments/pipeline/) | simulated sensors, gateway, Kupo indexer script, page server and the web page (Sensors / Trust / Details) |
+| [`experiments/contract/`](experiments/contract/) | the gateway-registry smart contract (Aiken, Plutus V3), the scripts that deploy and test it, and the measured cost of it (`PHASE3-RESULTS.md`) |
+| [`experiments/multisite/`](experiments/multisite/) | real gateways at three sites (three more VMs), each with its own node, wallet and sensors, sending through the contract; needs three extra machines, not part of the demo |
 | [`spec/`](spec/) | chain parameters (slot length, epoch, k, f) |
 | [`image/`](image/) | the docker image |
-| [`docs/`](docs/troubleshooting.md) | known problems and fixes |
+| [`docs/`](docs/) | [`INSTALL.md`](docs/INSTALL.md) (install and run on your own VM), [`troubleshooting.md`](docs/troubleshooting.md) (known problems and fixes) |
 
 `cardano.py` is the SEED script (topology, pools, start commands) and `build/` holds everything
 generated (keys, genesis, compose files; git-ignored).
