@@ -360,7 +360,6 @@ class Gateway:
         A pending batch that still has a .tx file was sent before: this is a resend (log line "sent again:")."""
         name = os.path.basename(p)
         old = self._load_tx(p)
-        again = "sent again" if old else "sent"
         if txid and self.view:
             if old and txid == old["txid"]:             # the node still has the old transaction: nothing new
                 write_atomic(p + ".status", b"settling")
