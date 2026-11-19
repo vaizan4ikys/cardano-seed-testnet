@@ -63,3 +63,17 @@ Yes, in principle. The batch is plain metadata in the transaction (sensor id, ki
 * **Mainnet.** Everything runs on a private chain with 3 pools on one VM; fees, block time and k differ from mainnet. The mainnet-like parameter set was used only for fork, join and capacity tests (report).
 * **Security audit.** None. [`PHASE0`](../experiments/contract/PHASE0-NOTES.md), "Not verified / still open", lists: protocol version 10 and later not tested, order of transactions inside a block only inferred, and the `publish` handler lets anyone register or delegate the credential.
 * **Other gaps:** the demo has not been run end to end on an amd64 Windows PC with VirtualBox ([`INSTALL.md`](INSTALL.md), "Tested on"); the report's measurements come from VMs on one Mac, many from 1 to 3 runs (report, "Read this first"); the cause of the contract's higher script cost with a reference script was not investigated ([`PHASE3`](../experiments/contract/PHASE3-RESULTS.md)).
+
+## 11. Why can a transaction disappear after it was in a block?
+
+Because the block it was in can be dropped. This is a normal part of Cardano, not a bug, and it happens on mainnet too. Two pools can win the same slot (the lottery is drawn for every pool separately), or a pool forges before the block of another pool has reached it. Both forge a block, and every node keeps only one of the two: when the blocks have the same length, the tie-break on the VRF value decides. A node that had its own block first switches to the other one ("Switched to a fork" in the node log) and drops its own block. Cardano does not put the transactions of a dropped block back into the waiting room, so a transaction that had only reached that one pool is gone until somebody sends it again.
+
+**What we measured** (`./scripts/fork-stats.sh` on the test VM, node logs of the 3 pools from 21:34 to 23:00 UTC on 19 November 2026, 85 minutes): the pools forged 1,008 blocks, 949 are in the chain and 59 (5.9 %) are not (pool 1: 24, pool 2: 17, pool 3: 18). All 59 lost a tie against a block in the same slot. The deepest rollback seen was 1 block. One of these dropped blocks (slot 65, 21:35:20) carried a registry transaction that had been sent to pool 1 three seconds earlier; pool 3 had forged the winning block 13 ms before. `./scripts/fork-stats.sh --list` prints every lost block with its time.
+
+**Mainnet.** The same thing happens there, but more rarely: a block comes about every 20 s there (`activeSlotsCoeff` 0.05) and about every 5 s on our test chain (0.2) ([`spec README`](../spec/README.md)). The chance that two pools win the same slot grows with this value, so by our own estimate (not measured) it is about 4 times lower per block on mainnet. Ties caused by slow block transfer between far-away pools come on top. We did not measure mainnet.
+
+**What follows from this:**
+
+* The newest block or two can still be replaced. Only a block with 60 more blocks on top is "Final" ([question 3](#3-how-fast-is-data-final-and-what-does-final-mean)); that is why the page shows "Settling n / 60" and why our scripts wait for it.
+* Our scripts do not trust "it was in a block": they keep the transaction (or the batch) until it is final and send it again if it is gone from the chain, and the registry steps wait for one more block on top.
+* Sending the same signed transaction again is safe. It has one fixed transaction ID and spends fixed inputs, so it can be in the chain only once: a node that already has it in a block, or whose inputs are already spent, rejects the second copy and nothing is paid twice.

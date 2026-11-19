@@ -23,6 +23,18 @@ The compose project is named `cardano-net-<N>`, not `output`. Use `./stop.sh` (w
 **`cardano-node` refuses the pool keys.**
 Key files must not be readable by group or others (`chmod 600`).
 
+**A transaction was submitted but never shows up in a block; `fresh.sh` stops with "STOP: p0-registry.sh failed" (registry transaction not seen).**
+**Cause:** the transaction was in a block for a moment, and the block was dropped. Two pools forged a block in the same slot, the node
+that had sent the transaction into its own block lost the tie and switched to the other block ("Switched to a fork" in the node log),
+and Cardano does not put the transactions of a dropped block back into the waiting room. On our chain this happens to about 6 % of the
+forged blocks (59 of 1,008 in one 85-minute log; see `./scripts/fork-stats.sh` and [FAQ, question 11](FAQ.md#11-why-can-a-transaction-disappear-after-it-was-in-a-block)).
+It is not a bug in the scripts or the contract.
+**Fix:** run the failed step again; the new chain, the keys and the contract build are kept, so no rebuild is needed:
+`./experiments/demo/fresh.sh --from 7 --yes` (step 7 mints the registry token; use the number of the step that failed).
+In the demo scripts the same transaction is sent again every 10 s while they wait, and later steps wait until the transaction is
+final (60 blocks), so a single dropped block does not show.
+To see whether blocks were dropped around the time of the failure: `./scripts/fork-stats.sh --since "<date and time>" --list`.
+
 **A new transaction fails with "All inputs are spent".**
 The previous transaction was not in a block yet. `send-metadata.sh` and `test-tx.sh` wait for the
 block; if you submit by hand, wait until the transaction's output exists on the ledger.

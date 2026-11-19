@@ -11,6 +11,7 @@ Run them from the repo root, e.g. `./scripts/check.sh`. They all use the network
 | `send-metadata.sh` | writes a text message into a transaction's metadata |
 | `read-metadata.sh` | reads such a message back, decrypting it if needed |
 | `leadership.sh [pool] [current\|next]` | slots a pool will lead (its VRF lottery wins) |
+| `fork-stats.sh [--since "<time>"] [--list]` | reads the pool logs (read-only): blocks forged vs. in the chain, ties lost, fork switches, deepest rollback |
 | `partition-test.sh` | cuts pool 3 off for a while, shows the fork and how it heals |
 
 ## Messages on the chain
