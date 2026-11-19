@@ -118,21 +118,28 @@ automatically if the estimate ever exceeds the limit.
 critical sensor data, so the gateway does not stop at "the transaction was in a block once":
 
 * **Why.** A block can be replaced by a competing block (two pools make a block for the same slot; on the lab chain about
-  1 block in 9, seen in the node logs). Cardano does **not** put the transactions of a replaced block back into the mempool.
+  6 % of the forged blocks: 59 of 1,008 in 85 minutes, seen in the node logs). Cardano does **not** put the transactions of a replaced block back into the mempool.
   The submit command returns 0 as soon as the transaction is in a block, so without more care the batch (about 100
   readings) would be lost and nobody would notice.
 * **What the gateway does** (needs `--kupo URL`; `demo.sh` passes it). It keeps the transaction id of every submitted batch
-  (the last 64-hex word of the last output line of the submit command), writes it into `batch-....json.tx` and sets the
+  (the last 64-hex word of the last line the submit command prints on stdout; notes on stderr are ignored), writes it into `batch-....json.tx` and sets the
   status to **settling**. Every `--confirm-interval` seconds (15) it asks Kupo about each settling batch:
   in a block: how many blocks are on top; at `--final-blocks` (60 = k) the status becomes **final**.
   Not listed by Kupo for longer than `--missing-grace` seconds (60; Kupo is normally less than a second behind the node):
   the block was replaced. The gateway logs `batch X: its transaction is no longer in the chain (block replaced): sending it
-  again` and submits the **same file** again (same hash); `p1-batch.sh` sees that the old transaction is neither in the
-  chain nor in the mempool and builds a new one. Batches are sent again **oldest first** (each one spends the coin of the one before).
-  A resend that the contract refuses for good (exit 2, for example the gateway was revoked meanwhile) goes to `dead/` like a first submit.
+  again` and sets the batch back to **pending** (its `.tx` file stays). The checking never submits anything, so it cannot
+  hold up new batches (a resend takes 10 to 100 seconds). The sender thread submits the **same file** again (same hash)
+  like any other pending batch, **oldest first** (each batch spends the coin of the one before); `p1-batch.sh` sees that
+  the old transaction is neither in the chain nor in the mempool and builds a new one. The sender counts failed tries like
+  for a first submit (`--max-tries`). A resend that the contract refuses for good (exit 2, for example the gateway was
+  revoked meanwhile) goes to `dead/`. Before a batch that was in the chain once goes to `dead/` after too many failed tries,
+  the gateway asks Kupo for its last transaction; if that is in the chain after all, the batch is followed again.
+* **Final never too early.** The block of a transaction is the tip block when it was first seen. If the gateway sees it
+  late (after a restart, or Kupo was behind), the gateway stores the tip block of that moment, which is never older than
+  the real block: "final" can only come late, never early. If the tip is too old to trust, it waits for the next round.
 * **Same method as the page.** Kupo gives the slot of the transaction (`/matches/*@<txid>`), the node gives the tip block
-  (`reader.DockerTip`), and the block of a transaction is the tip block when it was first seen (`reader.first_seen_block`,
-  an estimate from the slots when it was seen late). Depth = tip block - block + 1, like "Settling n/60" on the page.
+  (`reader.DockerTip`), and the block of a transaction is the tip block when it was first seen (`reader.first_seen_block`;
+  when it was seen late, `confirm.py` takes the tip block, see below). Depth = tip block - block + 1, like "Settling n/60" on the page.
 * **Kupo must keep spent outputs.** The change output of a batch transaction is spent by the next batch, so a Kupo that
   pruned spent outputs would make old batches look missing. `kupo.sh` starts Kupo with `--match '*'` and without
   `--prune-utxo`, so they stay (the page and `p1-batch.sh` rely on the same). As a safety net the gateway asks for the
@@ -148,10 +155,10 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
   | `final` | final, nothing more to do |
   | `sent` | submitted but not followed: dry mode, no `--kupo`, no transaction id in the output, or an outbox of the old gateway |
 
-  The `.tx` file is JSON: `txid`, `slot`, `header` (block header hash), `block` (tip block when first seen), `resends`, `failed`
-  (resends that failed in a row). A restart keeps all of this: the settling batches are followed on.
+  The `.tx` file is JSON: `txid`, `slot`, `header` (block header hash), `block` (tip block when first seen) and `resends`
+  (how often the batch was sent again). A restart keeps all of this: the settling batches are followed on.
 * **Log lines:** `sent: FILE (transaction ...)`, `final: FILE (transaction ..., 60 blocks deep)`, `batch X: its transaction is no
-  longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)`.
+  longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)` (only `sent: ` lines are new batches).
 * **Options:** `--kupo URL` (default `$KUPO_URL`; without it nothing is followed and a warning is logged), `--final-blocks 60`,
   `--confirm-interval 15`, `--missing-grace 60`, `--container` and `--magic` (for the node tip, as in `server.py`).
 

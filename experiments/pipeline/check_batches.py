@@ -9,6 +9,7 @@ Every batch file of the outbox ends in exactly one group:
   settling  in the chain, fewer blocks on top: a replaced block could still take it away
   pending   written, but never sent (the gateway is still working on it, or it is stopped)
   dead      in dead/: refused for good (for example the gateway is not approved) or failed too often
+            (some may have been sent before); not in the chain
   LOST      the gateway says "sent", but the batch is NOT in the chain: the readings are gone
 
 How a batch is found on the chain (the first that works):
@@ -188,7 +189,7 @@ def report(entries: List[Dict[str, Any]], final_blocks: int, show_list: bool) ->
     explain = {FINAL: "in the chain, %d or more blocks on top" % final_blocks,
                SETTLING: "in the chain, fewer blocks on top: could still be replaced",
                PENDING: "written, never sent",
-               DEAD: "refused or failed too often, not in the chain",
+               DEAD: "refused or failed too often (some may have been sent before); not in the chain",
                LOST: "the gateway says sent, but NOT in the chain"}
     lines = ["batches in the outbox: %d" % len(entries)]
     for g in GROUPS:
