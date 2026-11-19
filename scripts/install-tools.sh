@@ -54,6 +54,10 @@ elif docker info > /dev/null 2>&1; then
 elif id -nG | tr ' ' '\n' | grep -qx docker; then
   fail "docker is installed, but the engine does not answer"
   hint "sudo systemctl enable --now docker   (then: docker info)"
+elif id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
+  # the group database lists the user, but this login session started before "usermod -aG docker"
+  fail "you are in the group docker, but this login started before you were added"
+  hint "log out and in again (exit, then ssh again), or in this terminal only: newgrp docker. No reboot needed"
 else
   fail "docker is installed, but this user may not use it (not in the group docker, or the engine is not running)"
   hint "sudo usermod -aG docker \$USER   then log out and in again (or reboot); also: sudo systemctl enable --now docker"

@@ -176,7 +176,9 @@ sudo usermod -aG docker $USER
 exit
 ```
 
-`exit` closes the ssh session. In PowerShell log in again (`ssh -p 2222 <user>@127.0.0.1`). Then check:
+`exit` closes the ssh session. In PowerShell log in again (`ssh -p 2222 <user>@127.0.0.1`). No restart of the VM is needed:
+Linux reads a user's groups when they log in, so a new login is enough (a reboot also works; to stay logged in,
+`newgrp docker` gives the group to the current terminal only). Then check:
 
 ```
 docker run --rm hello-world
