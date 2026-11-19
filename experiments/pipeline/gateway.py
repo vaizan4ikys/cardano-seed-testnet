@@ -22,15 +22,19 @@ should be idempotent by batch hash.
 
 Critical data: with --kupo a batch is kept until its transaction is FINAL. The submit command returns 0 when the
 transaction is in a block once; but that block can be replaced by a competing block of another pool (on the lab
-chain about 1 block in 9), and Cardano does not put the transactions of a replaced block back. The states:
-  pending    written, not sent yet (or a submit failed and will be tried again)
-  settling   submitted. The transaction id (the last 64-hex word of the last line the submit command prints) is in
-             the .tx file. Every --confirm-interval seconds each settling batch is looked up in Kupo, the same way
-             as the web page does it: in a block -> how many blocks on top; at --final-blocks (default 60 = k) ->
-             final. Missing for longer than --missing-grace seconds (Kupo is normally less than a second behind,
-             so the transaction was in a replaced block) -> logged and submitted again: same file, same hash, a
-             new transaction. Oldest first (every batch spends the coin of the one before). A resend that is
-             refused for good goes to dead/ like a first submit.
+chain about 6 % of the forged blocks: 59 of 1,008 in 85 minutes), and Cardano does not put the transactions of a
+replaced block back. The states:
+  pending    written, not sent yet (or a submit failed and will be tried again, or the transaction vanished and the
+             batch must be sent again: then its .tx file is still there)
+  settling   submitted. The transaction id (the last 64-hex word of the last line the submit command prints on
+             stdout) is in the .tx file. Every --confirm-interval seconds each settling batch is looked up in Kupo,
+             the same way as the web page does it: in a block -> how many blocks on top; at --final-blocks (default
+             60 = k) -> final. Missing for longer than --missing-grace seconds (Kupo is normally less than a second
+             behind, so the transaction was in a replaced block) -> logged and set back to pending. The sender
+             thread then submits it again like any new batch (oldest first, because every batch spends the coin
+             of the one before): same file, same hash, a new transaction. The check never waits for a submit, so
+             new batches are not held up. A resend that is refused for good goes to dead/ like a first submit; one
+             that failed --max-tries times goes to dead/ too, unless its transaction is in the chain after all.
   final      the transaction is final: nothing more to do (the files stay as the record)
   sent       submitted, but not followed: dry mode, no --kupo, or no transaction id in the output of the submit
              command (the old gateway wrote only this). Such a batch is not checked.
@@ -94,8 +98,10 @@ def write_atomic(path: str, data: bytes) -> None:
 
 
 def find_txid(output: str, batch_hash: str) -> Optional[str]:
-    """The transaction id in the last line of the submit command's output: the last 64-hex word of that line
-    that is not the batch hash (p1-batch.sh prints "... batch HASH is in a block: tx TXID (...)"). None if none."""
+    """The transaction id in the last line of the submit command's STDOUT: the last 64-hex word of that line that
+    is not the batch hash (p1-batch.sh prints "... batch HASH is in a block: tx TXID (...)"). None if none.
+    Pass stdout only: the notes of the script on stderr ("sent the same transaction again", "registry.ref ...")
+    come last and must not be taken for the answer."""
     lines = output.strip().splitlines()
     words = [w for w in TXID_RE.findall(lines[-1]) if w != batch_hash] if lines else []
     return words[-1] if words else None
@@ -104,7 +110,7 @@ def find_txid(output: str, batch_hash: str) -> Optional[str]:
 def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], None] = default_log,
                 timeout: int = SUBMIT_TIMEOUT) -> Submit:
     """Returns submit(path, hash) -> True (sent), the transaction id (sent; the command printed it as the last
-    64-hex word of its last line), False (failed, try again) or "refused" (never try again).
+    64-hex word of its last stdout line), False (failed, try again) or "refused" (never try again).
 
     mode "dry" sends nothing; mode "command" runs the template (words {file} and {hash} are replaced; without
     them the file and the hash are appended as the last two arguments)."""
@@ -135,7 +141,7 @@ def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], 
             if r.returncode != EXIT_SENT:
                 log("submit command exit %d: %s" % (r.returncode, tail))
                 return False
-            return find_txid(r.stdout + r.stderr, h) or True
+            return find_txid(r.stdout, h) or True
         return submit
     raise ValueError("unknown submit mode: %s" % mode)
 
@@ -332,8 +338,8 @@ class Gateway:
     @staticmethod
     def _new_tx(txid: str, resends: int = 0) -> Dict[str, Any]:
         """What is remembered of a submitted transaction: the id, where Kupo showed it (slot, block header hash,
-        block number = tip block when first seen), how often the batch was sent again, failed resends in a row."""
-        return {"txid": txid, "slot": None, "header": None, "block": None, "resends": resends, "failed": 0}
+        block number = tip block when first seen) and how often the batch was sent again."""
+        return {"txid": txid, "slot": None, "header": None, "block": None, "resends": resends}
 
     def _dead_letter(self, p: str, tries: int, why: Optional[str] = None) -> None:
         """Move a batch file, its status (and its .tx file) to dead/ (never tried again)."""
@@ -350,18 +356,52 @@ class Gateway:
 
     def _mark_sent(self, p: str, txid: Optional[str]) -> None:
         """A submit worked. With a transaction id and a chain view the batch is "settling" (followed until final),
-        else "sent". The .tx file is written first: a crash in between only means one more (idempotent) submit."""
+        else "sent". The .tx file is written first: a crash in between only means one more (idempotent) submit.
+        A pending batch that still has a .tx file was sent before: this is a resend (log line "sent again:")."""
+        name = os.path.basename(p)
+        old = self._load_tx(p)
+        again = "sent again" if old else "sent"
         if txid and self.view:
-            self._save_tx(p, self._new_tx(txid))
+            if old and txid == old["txid"]:             # the node still has the old transaction: nothing new
+                write_atomic(p + ".status", b"settling")
+                self.log("batch %s: the node still has its transaction (mempool); waiting" % name)
+                return
+            resends = old["resends"] + 1 if old else 0
+            self._save_tx(p, self._new_tx(txid, resends))
             write_atomic(p + ".status", b"settling")
-            self.log("sent: %s (transaction %s...)" % (os.path.basename(p), txid[:12]))
+            if old:
+                self.stats["resent"] += 1
+                self.log("sent again: %s (new transaction %s..., resend %d)" % (name, txid[:12], resends))
+            else:
+                self.log("sent: %s (transaction %s...)" % (name, txid[:12]))
         else:
             write_atomic(p + ".status", b"sent")
-            self.log("sent: %s" % os.path.basename(p))
+            self.log("sent again: %s (no transaction id: not followed any more)" % name if old
+                     else "sent: %s" % name)
+
+    def _back_to_settling(self, p: str) -> Optional[bool]:
+        """Before a batch that was once in the chain (it has a .tx file) goes to dead/: ask Kupo for its
+        transaction. If it is there, the batch is "settling" again and is followed (True). False: it is not
+        there, or the batch was never sent. None: Kupo cannot be asked now (decide later)."""
+        rec = self._load_tx(p)
+        if rec is None or not self.view:
+            return False
+        try:
+            found = self.view.locate(rec["txid"], rec["slot"])
+        except Exception as e:
+            self.log("cannot ask Kupo about %s: %s" % (os.path.basename(p), e))
+            return None
+        if found is None:
+            return False
+        write_atomic(p + ".status", b"settling")
+        self.missing_since.pop(rec["txid"], None)
+        self.log("batch %s: not sent again, but its transaction %s... is in the chain: following it"
+                 % (os.path.basename(p), rec["txid"][:12]))
+        return True
 
     def send_pending(self) -> bool:
-        """Submit pending batches, oldest first. A failure stops the run (retry later, keeps the
-        order), except when the batch has now failed max_tries times: it goes to dead/ and the
+        """Submit pending batches, oldest first (a resend is a pending batch too). A failure stops the run (retry
+        later, keeps the order), except when the batch has now failed max_tries times: it goes to dead/ and the
         next batches are tried. Returns True when nothing is left pending."""
         with self.send_lock:
             for p in self.pending_files():
@@ -370,19 +410,25 @@ class Gateway:
                 if h not in os.path.basename(p):
                     self.log("ERROR %s does not match its hash, skipped" % os.path.basename(p))
                     continue
+                again = " when sent again" if self._load_tx(p) else ""
                 try:
                     ok = self.submit(p, h)
                 except Exception as e:
                     self.log("submit error: %s" % e)
                     ok = False
                 if ok == "refused":
-                    self._dead_letter(p, self._status(p)[1] + 1, "was refused")
+                    self._dead_letter(p, self._status(p)[1] + 1, "was refused" + again)
                     continue
                 if not ok:
                     tries = self._status(p)[1] + 1
-                    self.log("not sent: %s (try %d of %d)" % (os.path.basename(p), tries, self.max_tries))
+                    self.log("not sent%s: %s (try %d of %d)" % (again, os.path.basename(p), tries, self.max_tries))
                     if tries >= self.max_tries:
-                        self._dead_letter(p, tries)
+                        followed = self._back_to_settling(p)
+                        if followed is None:                    # Kupo cannot say: decide at the next try
+                            write_atomic(p + ".status", b"pending %d" % tries)
+                            return False
+                        if not followed:
+                            self._dead_letter(p, tries, "failed %d submits%s" % (tries, again))
                         continue
                     write_atomic(p + ".status", b"pending %d" % tries)
                     return False
@@ -392,8 +438,9 @@ class Gateway:
     # following the batches until they are final ----------------------------
     def check_settling(self) -> None:
         """One round: look at every settling batch (oldest first) in Kupo. In a block: count its depth, final at
-        final_blocks. Missing for longer than missing_grace: send it again. Does nothing without a chain view.
-        When Kupo or the node cannot be asked, nothing is concluded (a Kupo problem is not a replaced block)."""
+        final_blocks. Missing for longer than missing_grace: mark it for a resend (the sender thread sends it).
+        Does nothing without a chain view. When Kupo or the node cannot be asked, nothing is concluded (a Kupo
+        problem is not a replaced block). This never submits anything, so it never holds up the sender."""
         files = self.settling_files() if self.view else []
         if not files:
             return
@@ -408,10 +455,10 @@ class Gateway:
             self.view_problem = None
         for p in files:
             if not self._check_one(p):
-                break                                   # keeps the order: the oldest batch comes first
+                break                                   # Kupo failed: try the whole round again later
 
     def _check_one(self, p: str) -> bool:
-        """Look at one settling batch. Returns False when the round must stop (the resend failed)."""
+        """Look at one settling batch. Returns False when the round must stop (Kupo could not be asked)."""
         name = os.path.basename(p)
         rec = self._load_tx(p)
         if rec is None:                                 # cannot happen normally (.tx is written before the status)
@@ -424,12 +471,20 @@ class Gateway:
             self.log("cannot ask Kupo about %s: %s" % (name, e))
             return False
         if found is None:
-            return self._resend_if_missing(p, rec)
-        self.missing_since.pop(rec["txid"], None)
+            self._mark_if_missing(p, rec)
+        else:
+            self.missing_since.pop(rec["txid"], None)
+            self._count_depth(p, rec, found)
+        return True
+
+    def _count_depth(self, p: str, rec: Dict[str, Any], found: Tuple[int, Optional[str]]) -> None:
+        """The transaction is in a block (found = slot, header hash): remember it, count the blocks on top, and
+        make the batch "final" at final_blocks. If the block changed, counting starts again."""
+        name = os.path.basename(p)
         slot, header = found
         changed = (slot, header) != (rec["slot"], rec["header"])
         if rec["block"] is None or slot != rec["slot"]:
-            if rec["slot"] is not None:
+            if rec["slot"] is not None and slot != rec["slot"]:
                 self.log("batch %s: its transaction is now in another block (slot %d, was %d): counting again"
                          % (name, slot, rec["slot"]))
             rec["block"] = self.view.new_block(slot)
@@ -443,46 +498,20 @@ class Gateway:
             self.log("final: %s (transaction %s..., %d blocks deep)" % (name, rec["txid"][:12], depth))
         elif changed:
             self._save_tx(p, rec)
-        return True
 
-    def _resend_if_missing(self, p: str, rec: Dict[str, Any]) -> bool:
-        """The transaction is not in Kupo. Wait for missing_grace seconds, then submit the batch again.
-        Returns False when the resend failed (the caller stops the round)."""
-        name, txid = os.path.basename(p), rec["txid"]
+    def _mark_if_missing(self, p: str, rec: Dict[str, Any]) -> None:
+        """The transaction is not in Kupo. Wait for missing_grace seconds (Kupo may be a moment behind); then set
+        the batch back to "pending" and wake the sender, which submits the same file again (a new transaction).
+        The .tx file stays: it tells the sender that this is a resend and how often the batch was sent before."""
+        txid = rec["txid"]
         since = self.missing_since.setdefault(txid, self.clock())
         if self.clock() - since < self.missing_grace:
-            return True                                 # Kupo may be a moment behind: wait
-        self.log("batch %s: its transaction is no longer in the chain (block replaced): sending it again" % name)
-        with open(p, "rb") as f:
-            h = layout.batch_hash(f.read())
-        try:
-            with self.send_lock:
-                ok = self.submit(p, h)
-        except Exception as e:
-            self.log("submit error: %s" % e)
-            ok = False
-        if ok == "refused":
-            self._dead_letter(p, rec["failed"] + 1, "was refused when sent again")
-            return True
-        if not ok:
-            rec["failed"] += 1
-            self.log("not sent again: %s (try %d of %d)" % (name, rec["failed"], self.max_tries))
-            if rec["failed"] >= self.max_tries:
-                self._dead_letter(p, rec["failed"], "failed %d submits when sent again" % rec["failed"])
-                return True
-            self._save_tx(p, rec)
-            return False
+            return
+        self.log("batch %s: its transaction is no longer in the chain (block replaced): sending it again"
+                 % os.path.basename(p))
         del self.missing_since[txid]
-        if not isinstance(ok, str):                     # sent, but no transaction id to follow
-            write_atomic(p + ".status", b"sent")
-            self.log("sent again: %s (no transaction id in the output: not followed any more)" % name)
-        elif ok == txid:
-            self.log("batch %s: the node still has its transaction (mempool); waiting" % name)
-        else:
-            self._save_tx(p, self._new_tx(ok, rec["resends"] + 1))
-            self.stats["resent"] += 1
-            self.log("sent again: %s (new transaction %s..., resend %d)" % (name, ok[:12], rec["resends"] + 1))
-        return True
+        write_atomic(p + ".status", b"pending")
+        self.wake.set()
 
     # threads ----------------------------------------------------------
     def start(self, retry: float = 10.0, check: float = CONFIRM_INTERVAL) -> None:

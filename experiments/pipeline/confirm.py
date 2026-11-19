@@ -8,7 +8,8 @@ How (the same method as the web page, see reader.py):
   * Kupo says where a transaction is: its slot and the header hash of its block (/matches/*@txid).
   * The node says how long the chain is: the tip block number (reader.DockerTip, `docker exec cardano-cli`).
   * Kupo has no block numbers. The block of a transaction is the tip block at the moment it was first seen
-    (reader.first_seen_block); depth = tip block - block + 1.
+    (reader.first_seen_block); depth = tip block - block + 1. When it is first seen late, the tip block
+    is used (it is never older than the real block), so "final" may come late, never early.
 
 Kupo is started without --prune-utxo, so a spent output stays listed. If a Kupo did prune, a transaction whose outputs
 are all spent would look missing; as a safety net we then ask for its metadata in the slot where we saw it before
@@ -76,9 +77,18 @@ class ChainView:
         return slot_hint, header
 
     def new_block(self, slot: int) -> Optional[int]:
-        """Block number to remember for a transaction that is found in `slot` for the first time."""
-        fresh = self.clock() - self.tip_time <= TIP_FRESH_S
-        return reader.first_seen_block(self.tip, fresh, slot)[0]
+        """Block number to remember for a transaction that is found in `slot` for the first time.
+
+        Final must never come too early, only late. So an estimate is never stored as if it were exact:
+          * found close to a fresh tip: the exact block (the tip block, or the next one);
+          * found far behind a fresh tip (a restart, a long Kupo pause): the exact block is not known, but it is
+            never newer than the tip block, so the tip block is stored. Depth is then counted from there and can
+            only be too small (final late), never too large;
+          * the tip is older than TIP_FRESH_S: None. The batch is looked at again in the next round."""
+        if not self.tip or self.clock() - self.tip_time > TIP_FRESH_S:
+            return None
+        block, estimate = reader.first_seen_block(self.tip, True, slot)
+        return self.tip["block"] if estimate else block
 
     def depth(self, block: Optional[int]) -> Optional[int]:
         """Blocks on top of a transaction in `block` (1 = in the tip block); None when not known."""

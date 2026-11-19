@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 
 import check_batches
@@ -152,6 +153,21 @@ class TestFindTxid(unittest.TestCase):
         self.assertIs(sub0("file.json", self.H), True)         # success without a transaction id
 
 
+    def test_notes_on_stderr_are_not_the_answer(self):
+        """p1-batch.sh prints its resend / repair notes on stderr, after the OK line."""
+        ok = "OK: gateway A batch %s is in a block: tx %s (size 1500 bytes)" % (self.H, txid_of(5))
+        notes = ["  not in a block after 10 s: sent the same transaction again",
+                 "note: registry.ref pointed to a coin that is gone (%s#0); now using %s#0 (found by its token)"
+                 % (txid_of(70), txid_of(71))]
+        for note in notes:
+            script = "echo '%s'; echo '%s' >&2" % (ok, note)
+            sub = gateway.make_submit("command", "sh -c \"%s\" x" % script, log=quiet)
+            self.assertEqual(sub("file.json", self.H), txid_of(5), note)
+        # nothing on stdout but a note on stderr: no txid (the batch is "sent", not followed)
+        sub = gateway.make_submit("command", "sh -c \"echo '%s' >&2\" x" % notes[1], log=quiet)
+        self.assertIs(sub("file.json", self.H), True)
+
+
 class TestFollowToFinal(FollowCase):
     def test_in_a_block_then_final(self):
         name = self.send_batches(1)[0]
@@ -186,7 +202,13 @@ class TestFollowToFinal(FollowCase):
         self.assertEqual(len(self.sub.calls), 2)                        # inside the grace time: nothing yet
         self.clock.t += 2
         self.gw.check_settling()
+        self.assertEqual(len(self.sub.calls), 2)                        # the check only marks them: nothing submitted
+        self.assertEqual([self.status(n) for n in names], ["pending", "pending"])
+        self.assertTrue(self.gw.wake.is_set())                          # and the sender is woken
+        self.gw.send_pending()
         self.assertEqual([c[0] for c in self.sub.calls[2:]], names)     # sent again, oldest first
+        self.assertEqual(len([m for m in self.logs if m.startswith("sent again: " + names[0])]), 1)
+        self.assertEqual(len([m for m in self.logs if m.startswith("sent: ")]), 2)    # demo.sh counts these
         self.assertTrue(any("no longer in the chain (block replaced): sending it again" in m for m in self.logs))
         self.assertEqual(self.gw.stats["resent"], 2)
         self.assertEqual(self.tx(names[0])["txid"], self.sub.txids[2])  # the new transaction is followed
@@ -209,8 +231,10 @@ class TestFollowToFinal(FollowCase):
         self.gw.check_settling()
         self.clock.t += 61
         self.gw.check_settling()
+        self.gw.send_pending()
         self.clock.t += 61
         self.gw.check_settling()
+        self.gw.send_pending()
         self.assertEqual(len(self.sub.calls), 2)
         self.assertEqual(self.sub.calls[0], self.sub.calls[1])
         self.assertIn(self.sub.calls[0][1], name)
@@ -233,6 +257,7 @@ class TestFollowToFinal(FollowCase):
         self.clock.t += 61
         self.sub.answer = "refused"                                     # revoked in the meantime
         self.gw.check_settling()
+        self.gw.send_pending()
         self.assertFalse(os.path.exists(os.path.join(self.dir, name)))
         dead = os.listdir(os.path.join(self.dir, "dead"))
         self.assertEqual(sorted(dead), [name, name + ".status", name + ".tx"])
@@ -247,12 +272,15 @@ class TestFollowToFinal(FollowCase):
         self.clock.t += 61
         self.sub.answer = False                                         # both have been missing for 61 s
         calls = len(self.sub.calls)
-        self.gw.check_settling()                                        # the oldest fails: the round stops
+        self.gw.check_settling()                                        # both are marked, nothing is submitted
+        self.assertEqual(len(self.sub.calls), calls)
+        self.gw.send_pending()                                          # the oldest fails: the run stops
         self.assertEqual(len(self.sub.calls), calls + 1)
-        self.assertEqual(self.tx(names[0])["failed"], 1)
-        self.gw.check_settling()                                        # second failure: dead; the next one is tried
+        self.assertEqual(self.status(names[0]), "pending 1")
+        self.gw.send_pending()                                          # second failure: dead; the next one is tried
         self.assertTrue(os.path.exists(os.path.join(self.dir, "dead", names[0])))
-        self.assertEqual([os.path.basename(p) for p in self.gw.settling_files()], [names[1]])
+        self.assertEqual([os.path.basename(p) for p in self.gw.pending_files()], [names[1]])   # tried next, failed once
+        self.assertEqual(self.status(names[1]), "pending 1")
 
     def test_a_kupo_problem_is_not_a_replaced_block(self):
         self.send_batches(1)
@@ -302,6 +330,134 @@ class TestFollowToFinal(FollowCase):
         self.assertEqual(self.gw.pending_files(), [])
 
 
+class TestResendDoesNotBlock(FollowCase):
+    def test_the_check_never_takes_the_send_lock(self):
+        """A resend can take 100 s: the checking must not wait for the sender, nor hold it up."""
+        self.send_batches(1)
+        self.gw.check_settling()
+        self.clock.t += 61
+        self.assertTrue(self.gw.send_lock.acquire(False))               # "the sender is busy submitting"
+        try:
+            t = threading.Thread(target=self.gw.check_settling)
+            t.start()
+            t.join(5)
+            self.assertFalse(t.is_alive())
+        finally:
+            self.gw.send_lock.release()
+        self.assertEqual(len(self.sub.calls), 1)                        # the check submitted nothing
+
+    def test_a_new_batch_goes_out_while_an_old_one_waits_for_its_resend(self):
+        names = self.send_batches(1)
+        self.gw.check_settling()
+        self.clock.t += 61
+        self.gw.check_settling()                                        # batch 1 pending again
+        self.gw.add_reading(reading(50))                                # batch 2 is new
+        self.gw.send_pending()
+        self.assertEqual([c[0][:12] for c in self.sub.calls], ["batch-000001", "batch-000001", "batch-000002"])
+        self.assertEqual(self.gw.pending_files(), [])
+
+    def test_resend_count_goes_on_and_log_lines_differ(self):
+        name = self.send_batches(1)[0]
+        for n in (1, 2):
+            self.gw.check_settling()
+            self.clock.t += 61
+            self.gw.check_settling()
+            self.gw.send_pending()
+            self.assertEqual(self.tx(name)["resends"], n)
+            self.assertEqual(self.status(name), "settling")
+        self.assertEqual(self.gw.stats["resent"], 2)
+        self.assertEqual(len([m for m in self.logs if m.startswith("sent again: ")]), 2)
+        self.assertEqual(len([m for m in self.logs if m.startswith("sent: ")]), 1)
+
+    def test_a_resend_survives_a_restart(self):
+        name = self.send_batches(1)[0]
+        self.gw.check_settling()
+        self.clock.t += 61
+        self.gw.check_settling()
+        gw2 = self.make()                                               # restart: the batch is pending with a .tx file
+        gw2.send_pending()
+        self.assertEqual(self.tx(name)["resends"], 1)
+        self.assertEqual(len(self.sub.calls), 2)
+
+    def test_the_old_transaction_still_in_the_mempool(self):
+        name = self.send_batches(1)[0]
+        self.gw.check_settling()
+        self.clock.t += 61
+        self.gw.check_settling()
+        self.sub.answer = self.tx(name)["txid"]                         # "already sent: ... is transaction X"
+        self.gw.send_pending()
+        self.assertEqual(self.status(name), "settling")
+        self.assertEqual(self.tx(name)["resends"], 0)
+        self.assertEqual(self.gw.stats["resent"], 0)
+
+
+class TestFinalNeverEarly(FollowCase):
+    def test_first_seen_late_is_counted_from_the_tip_of_that_moment(self):
+        name = self.send_batches(1)[0]
+        self.chain.add(self.sub.txids[0])                               # in the block at 1000 ...
+        self.chain.advance(100)                                         # ... but the gateway looks 100 blocks later
+        self.gw.check_settling()
+        self.assertEqual(self.tx(name)["block"], 1100)                  # not 1000 and not an estimate
+        self.assertEqual(self.status(name), "settling")                 # an estimate would have said "final" now
+        self.chain.advance(K - 1)
+        self.gw.check_settling()
+        self.assertEqual(self.status(name), "final")
+
+
+class TestDeadLetterChecksTheChain(FollowCase):
+    def failing_resend(self, max_tries=2):
+        """A batch that was in the chain once, vanished, and whose resends keep failing."""
+        self.gw = self.make(max_tries=max_tries)
+        name = self.send_batches(1)[0]
+        txid = self.sub.txids[0]
+        self.chain.add(txid)
+        self.gw.check_settling()
+        self.chain.drop(txid)
+        self.gw.check_settling()
+        self.clock.t += 61
+        self.gw.check_settling()
+        self.sub.answer = False
+        return name, txid
+
+    def test_transaction_is_in_the_chain_after_all(self):
+        name, txid = self.failing_resend()
+        self.gw.send_pending()                                          # try 1
+        self.chain.add(txid)                                            # the "failed" submit had worked after all
+        self.gw.send_pending()                                          # try 2 = max_tries
+        self.assertEqual(self.status(name), "settling")
+        self.assertTrue(os.path.exists(os.path.join(self.dir, name)))
+        self.assertEqual(self.gw.stats["dead"], 0)
+        self.assertTrue(any("is in the chain: following it" in m for m in self.logs))
+        self.chain.advance(K)
+        self.gw.check_settling()
+        self.assertEqual(self.status(name), "final")
+
+    def test_not_in_the_chain_goes_to_dead(self):
+        name, txid = self.failing_resend()
+        self.gw.send_pending()
+        self.gw.send_pending()
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "dead", name)))
+        self.assertEqual(self.gw.stats["dead"], 1)
+
+    def test_kupo_down_decides_later(self):
+        name, txid = self.failing_resend()
+        self.gw.send_pending()
+        self.chain.down = True
+        self.gw.send_pending()                                          # max_tries reached, but Kupo cannot say
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "dead", name)))
+        self.assertEqual(self.status(name), "pending 2")
+        self.chain.down = False
+        self.gw.send_pending()
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "dead", name)))
+
+    def test_a_batch_that_was_never_in_the_chain_goes_to_dead_at_once(self):
+        self.sub.answer = False
+        self.gw = self.make(max_tries=1)
+        self.gw.add_reading(reading(1))
+        self.gw.send_pending()
+        self.assertEqual(self.gw.stats["dead"], 1)
+
+
 class TestChainView(unittest.TestCase):
     def test_pruning_kupo_is_noticed_through_the_metadata(self):
         chain, logs = FakeChain(), []
@@ -324,6 +480,30 @@ class TestChainView(unittest.TestCase):
         view.refresh()
         self.assertEqual(view.depth(1000), 10)
         self.assertIsNone(view.depth(None))
+
+    def test_a_late_sighting_is_never_stored_as_an_exact_block(self):
+        """Seen far behind the tip (a restart): the tip block is stored, so final can only be late."""
+        chain, clock = FakeChain(), FakeClock()
+        view = confirm.ChainView(chain, chain, quiet, clock)
+        old_slot = chain.slot                                           # the transaction is in the block at 1000
+        chain.advance(100)                                              # 100 blocks later the gateway looks
+        view.refresh()
+        block = view.new_block(old_slot)
+        self.assertEqual(block, chain.block)                            # not 1000, not an estimate below the real one
+        self.assertGreaterEqual(block, 1000)                            # never older than the real block
+        self.assertEqual(view.depth(block), 1)                          # counted from now: 59 more blocks to final
+        chain.advance(59)
+        view.refresh()
+        self.assertEqual(view.depth(block), 60)
+
+    def test_an_old_tip_is_not_used(self):
+        chain, clock = FakeChain(), FakeClock()
+        view = confirm.ChainView(chain, chain, quiet, clock)
+        view.refresh()
+        clock.t += confirm.TIP_FRESH_S + 1                              # the tip has not been refreshed
+        self.assertIsNone(view.new_block(chain.slot))                   # wait for a fresh look
+        view.refresh()
+        self.assertEqual(view.new_block(chain.slot), 1000)
 
     def test_refresh_says_why_not(self):
         chain = FakeChain()
@@ -416,6 +596,7 @@ class TestCheckBatches(unittest.TestCase):
         text = check_batches.report(list(result.values()), K, False)
         self.assertIn("LOST", text)
         self.assertIn(b[3][0], text)
+        self.assertIn("refused or failed too often (some may have been sent before); not in the chain", text)
 
     def test_old_outbox_without_txid_is_matched_by_hash_and_content(self):
         b = self.write_batches(4)
