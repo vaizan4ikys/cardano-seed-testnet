@@ -67,7 +67,8 @@ Download the ISO "Ubuntu Server 22.04 LTS" (22.04.x, `...-live-server-amd64.iso`
 **Use 22.04, not 24.04.** The SEED Emulator version we use needs old pinned Python packages (web3 5.31.1, requests 2.22.0 ...).
 We tried to install them on both versions (in containers): on Ubuntu 22.04 (Python 3.10) it works; on Ubuntu 24.04 (Python 3.12) the import of `seedemu`
 fails three times in a row (`urllib3` needs `six.moves`, `web3` needs `pkg_resources`, `parsimonious` needs `inspect.getargspec`), and it is not worth patching.
-(Ubuntu 20.04, Python 3.8, also works: it is what our test VM runs.)
+(Ubuntu 20.04 is not recommended: it has no `docker-compose-v2` package, so step 8 needs Docker's own repository instead,
+and its standard support has ended. Our lab VMs run 20.04, but Docker on them was set up long before this guide.)
 
 *You should see:* a file `ubuntu-22.04...-live-server-amd64.iso` of about 2 GB.
 
@@ -153,6 +154,20 @@ sudo apt install -y docker.io docker-compose-v2
 
 (Alternative, the official packages from Docker's own repository: <https://docs.docker.com/engine/install/ubuntu/>; install `docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin`.
 The scripts only need that `docker` and `docker compose` work.)
+
+**On Ubuntu 20.04** `docker-compose-v2` does not exist (`Unable to locate package`). Use Docker's own repository instead (Docker's documented
+method; for 20.04 it still serves Docker 28.1 and Compose 2.35, the last versions built for it):
+
+```
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+If you ticked "docker" in the list of snaps while installing Ubuntu, remove that copy first: `sudo snap remove docker`.
 
 ### 9. Use Docker without sudo
 
@@ -376,6 +391,7 @@ The exact limits are in [`spec/README.md`](../spec/README.md) and [`docs/trouble
 | `permission denied while trying to connect to the Docker daemon socket` | your user is not in the `docker` group yet, or you did not log in again | `sudo usermod -aG docker $USER`, then `exit` and log in again; check with `docker run --rm hello-world` |
 | `ModuleNotFoundError: No module named 'seedemu'` | the clone of the SEED Emulator is not in `~/seed-emulator` (the scripts set `PYTHONPATH` themselves) | clone it (step 10), or set the folder: `export SEED_EMULATOR=<folder>`; `./scripts/install-tools.sh --check` shows what is missing |
 | `ModuleNotFoundError: No module named 'web3'` (or `yaml`, `eth_account`, `requests`, `urllib3`, `pkg_resources`, `parsimonious`) | the Python packages of SEED are missing, or you run a different Python than `~/seed-venv`, or you use Ubuntu 24.04 (its Python 3.12 is too new for the pinned packages, see step 2) | `./scripts/install-tools.sh` creates `~/seed-venv`; if `~/seed-venv` is broken, delete it (`rm -rf ~/seed-venv`) and run the script again; on 24.04 install Ubuntu 22.04 instead |
+| `sudo apt update`: `The repository 'file:/cdrom ... Release' no longer has a Release file` | the Ubuntu installer added the install ISO ("cdrom") as a package source; the ISO is not attached any more | `sudo sed -i '/cdrom/s/^deb/# deb/' /etc/apt/sources.list`, then `sudo apt update` again. If `apt install` then says `Unable to locate package`, the installer had no internet and wrote no online sources: check `grep -v '^#' /etc/apt/sources.list` |
 | `clock is not NTP-synced yet, wait and retry` | the VM clock is not synchronised | `sudo timedatectl set-ntp true`, wait 1 minute, `timedatectl` must show `System clock synchronized: yes` |
 | `fresh.sh` or the preflight says the page port 8088 is busy | an old page server or another program uses the port | `./experiments/demo/demo.sh --step 6`; find the owner with `ss -ltnp \| grep 8088`; or use another port: `PORT=8089 ./experiments/demo/demo.sh` (then use 8089 in the tunnel and in the browser) |
 | Windows: `bind [127.0.0.1]:8088: Address already in use` / `Could not request local forwarding` | an old tunnel window or another program on Windows uses port 8088 | close the old ssh window; find the owner in PowerShell: `netstat -ano \| findstr :8088`; or use another local port: `ssh -p 2222 -L 8090:127.0.0.1:8088 <user>@127.0.0.1` and open <http://127.0.0.1:8090> |
