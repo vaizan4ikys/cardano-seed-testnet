@@ -40,7 +40,7 @@ for attempt in 1 2; do
   OUT=$(submit_tx "b$BATCH_HASH") && break
   if echo "$OUT" | grep -q 'PlutusFailure'; then
     echo "REFUSED by the contract: gateway $GW is not on the registry list (batch $BATCH_HASH)"; exit 2
-  elif echo "$OUT" | grep -q 'BadInputsUTxO' && [ "$attempt" = 1 ]; then
+  elif echo "$OUT" | grep -q -E 'BadInputsUTxO|All inputs are spent' && [ "$attempt" = 1 ]; then
     sleep 1; continue          # the registry (or our own coin) changed while we built: look again once
   else
     echo "submit failed: $(echo "$OUT" | short_err | head -c 200)"; exit 1

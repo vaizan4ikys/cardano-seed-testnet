@@ -47,7 +47,8 @@ resend() {
     return 0
   fi
   sleep 1; tx_visible "$txid" && return 0          # it got into a block in the meantime
-  if echo "$answer" | grep -q BadInputsUTxO; then
+  # the node says so in one of two ways: "All inputs are spent" (its mempool check) or BadInputsUTxO (the ledger)
+  if echo "$answer" | grep -q -E 'All inputs are spent|BadInputsUTxO'; then
     echo "  cannot send it again: its inputs are spent by another transaction" >&2; return 1
   fi
   echo "  sending it again failed (will try again): $(echo "$answer" | short_err | head -c 150)" >&2
