@@ -34,10 +34,11 @@
 #                                  funding)
 #                              9   rewrites gateways.json from the wallet files
 #                              10  only checks
-#                            Not allowed: 1 (it builds the new chain: that is the run without --from) and 0 (checks).
+#                            --from 1 is the same as no --from (a new chain; it asks first). 0 and 11+ are refused.
+#                            After you changed an in-container script, resume at 4 or lower (step 4 copies them).
 #                            --dry-run works with --from (it lists only the steps from N on).
 #   Each transaction step (5, 7, 8) waits until its transaction is in a block AND one more block is on top, and sends
-#   the same signed transaction again when it gets lost (on this chain about 1 block in 9 is replaced by another one).
+#   the same signed transaction again when it gets lost (on this chain about 6 % of the forged blocks are replaced by another one).
 #   --from and these waits are NOT yet run for real on the VM (only checked with bash -n and --dry-run).
 #
 # Mac -> seedvm mode TESTED END TO END on 13 November 2026 (run for real with --yes: every step OK, preflight all PASS).

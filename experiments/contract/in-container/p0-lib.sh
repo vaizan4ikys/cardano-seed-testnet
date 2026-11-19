@@ -32,15 +32,38 @@ EXU_STEPS=$(echo "$EXU" | tr -d '() ' | cut -d, -f1); EXU_MEM=$(echo "$EXU" | tr
 
 # ---- waiting for the chain ----
 tx_visible() { cli query utxo --tx-in "$1#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; }
-# wait_tx TXID [SIGNED_FILE]: wait until output 0 of the transaction is visible (= it is in a block).
+# in_mempool TXID: is the transaction still waiting in our node's mempool (not in a block yet)? (return code 0 = yes)
+in_mempool() { cli query tx-mempool tx-exists "$1" --testnet-magic "$MAGIC" 2>/dev/null | grep -q true; }
+
+# resend TXID SIGNED_FILE: send the same signed transaction again, because it is neither in a block nor in our
+# node's mempool any more (the block that carried it was dropped). A resend is always safe: it spends the same inputs,
+# so it can be in the chain only once. Return code 0 = sent again (or it turned up in a block meanwhile, or the node
+# could not be asked: try again later); 1 = the node refuses it because its inputs are spent by ANOTHER transaction,
+# so it can never get into a block any more and waiting longer is pointless.
+resend() {
+  local txid=$1 signed=$2 answer
+  if answer=$(cli transaction submit --tx-file "$signed" --testnet-magic "$MAGIC" 2>&1); then
+    echo "  the transaction was lost (not in a block, not in the mempool): sent the same transaction again" >&2
+    return 0
+  fi
+  sleep 1; tx_visible "$txid" && return 0          # it got into a block in the meantime
+  if echo "$answer" | grep -q BadInputsUTxO; then
+    echo "  cannot send it again: its inputs are spent by another transaction" >&2; return 1
+  fi
+  echo "  sending it again failed (will try again): $(echo "$answer" | short_err | head -c 150)" >&2
+  return 0
+}
+
+# wait_tx TXID [SIGNED_FILE [MAX_SECONDS]]: wait until output 0 of the transaction is visible (= it is in a block).
 # Without SIGNED_FILE: wait up to 60 s and never send anything (the experiment scripts rely on this).
-# With SIGNED_FILE (the signed transaction file): wait up to 90 s, and every 10 s that the tx is still not in a block
-# submit the same signed file again. Why: if the block that carried our tx is dropped, no pool has the tx any more.
-# A resend is always safe: it spends the same inputs, so it can be in the chain only once, and a node that already
-# has the tx (in the mempool or in a block) just refuses it. We ignore the node's answer to a resend.
-# The resend line goes to stderr, so it is never the last line a script prints on stdout.
+# With SIGNED_FILE (the signed transaction file): wait up to MAX_SECONDS (default 90). Every 10 s that the tx is
+# neither in a block nor in our node's mempool, send the same signed file again (resend). Why: if the block that
+# carried our tx is dropped, no pool has the tx any more. A tx that only waits in the mempool is left alone.
+# Gives up at once when a resend shows that the inputs are spent by another transaction.
+# The notes go to stderr. Callers read only the LAST line on stdout (the gateway) or the last line (demo.sh), and
+# the notes always come before it.
 wait_tx() {
-  local txid=$1 signed=${2:-} n=0 start=$SECONDS next_resend waited
+  local txid=$1 signed=${2:-} max=${3:-90} n=0 start=$SECONDS next_check
   if [ -z "$signed" ]; then
     until tx_visible "$txid"; do
       sleep 0.5; n=$((n+1))
@@ -48,16 +71,16 @@ wait_tx() {
     done
     return 0
   fi
-  next_resend=$((start + 10))
+  next_check=$((start + 10))
   until tx_visible "$txid"; do
     sleep 0.5
-    waited=$((SECONDS - start))
-    [ $waited -ge 90 ] && { echo "timeout waiting for $txid"; return 1; }
-    if [ $SECONDS -ge $next_resend ]; then
-      echo "  not in a block after $waited s: sent the same transaction again" >&2
-      cli transaction submit --tx-file "$signed" --testnet-magic "$MAGIC" > /dev/null 2>&1 || true
-      next_resend=$((SECONDS + 10))
-    fi
+    [ $((SECONDS - start)) -ge "$max" ] && { echo "timeout waiting for $txid"; return 1; }
+    [ $SECONDS -ge $next_check ] || continue
+    next_check=$((SECONDS + 10))
+    in_mempool "$txid" && continue                  # still waiting for a block: nothing to do
+    tx_visible "$txid" && return 0
+    resend "$txid" "$signed" \
+      || { echo "the transaction $txid can no longer get into a block (its inputs are spent)"; return 1; }
   done
   return 0
 }
@@ -78,8 +101,9 @@ wait_settled() {
       sleep 1; n=$((n+1))
       [ $n -gt 60 ] && { echo "timeout: no block on top of the block with $txid"; return 1; }
     done
-    echo "  the block with the transaction was replaced: sent the same transaction again" >&2
-    cli transaction submit --tx-file "$signed" --testnet-magic "$MAGIC" > /dev/null 2>&1 || true
+    echo "  the block with the transaction was replaced by another block" >&2
+    resend "$txid" "$signed" \
+      || { echo "the transaction $txid can no longer get into a block (its inputs are spent)"; return 1; }
   done
   echo "the transaction $txid keeps vanishing from the chain"; return 1
 }
@@ -177,7 +201,8 @@ registry_coin() {
   if [ -n "$ref" ] && live_coin "$ref"; then echo "$ref"; return 0; fi
   found=$(find_registry)
   [ -n "$found" ] || { echo "no single registry coin found at the admin address" >&2; return 1; }
-  echo "$found" > registry.ref
+  # write it atomically (temporary file + mv): p1-batch.sh may do this at the same time for the other gateway
+  echo "$found" > "registry.ref.tmp.$$" && mv "registry.ref.tmp.$$" registry.ref
   echo "note: registry.ref pointed to a coin that is gone (${ref:-none}); now using $found (found by its token)" >&2
   echo "$found"
 }

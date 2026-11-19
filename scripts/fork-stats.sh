@@ -36,7 +36,8 @@ done
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 EVENTS='Forge.Loop.(ForgedBlock|AdoptedBlock|DidntAdoptBlock)\]|AddBlockEvent.(AddedToCurrentChain|SwitchedToAFork)\]'
 for n in 1 2 3; do
-  docker exec "$(require_pool "$n")" grep -E "$EVENTS" /var/log/cardano-node.log > "$TMP/pool$n.log"
+  # "|| true": grep exits 1 when a log has no such line yet (a very young chain); that is not an error here
+  docker exec "$(require_pool "$n")" grep -E "$EVENTS" /var/log/cardano-node.log > "$TMP/pool$n.log" || true
 done
 # block number of the tip (the first block is number 0), to check that the log is complete
 TIP_BLOCK=$(docker exec "$(require_pool 1)" cardano-cli conway query tip --testnet-magic "$MAGIC" \

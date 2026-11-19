@@ -331,7 +331,12 @@ finish() {
   say; say "  step $1: $r, $((SECONDS - S0)) s"
 }
 
-sync_demo() { push "$HERE/" $REPO/experiments/demo/; }
+# sync_demo: Mac mode: copy the demo folder AND the pipeline folder (gateway and page code: the gateway's options
+# must match demo.sh) to the chain host. Nothing happens in local mode.
+sync_demo() {
+  push "$HERE/" $REPO/experiments/demo/
+  push "$ROOT/experiments/pipeline/" "$VPIPE/" --exclude __pycache__ --exclude 'outbox*'
+}
 
 # For --step N without step 0: find the container, the run directory and the Kupo address.
 BASICS_DONE=0
