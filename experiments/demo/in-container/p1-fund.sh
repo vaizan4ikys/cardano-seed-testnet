@@ -2,13 +2,21 @@
 # Runs INSIDE pool 1's container (fresh.sh copies it to /tmp/p0-scripts/). Funds the two demo gateways once, from the
 # dedicated administrator (same amounts as p0-write.sh): 20 ADA to pay with + 5 ADA only for collateral, each.
 #   P0_DIR=/tmp/p0n ./p1-fund.sh <magic>        idempotent: does nothing if the work dir has the file "funded"
+# It waits (wait_settled in p0-lib.sh) until the funding is in a block AND one more block is on top, and sends the
+# same signed transaction again if it gets lost (a block that carried it can be replaced by a block of another pool).
+# Safe to run again after a failure: if an earlier run sent the funding (fund.signed) and that transaction is in a
+# block, the next run only writes the file "funded" and does not fund a second time.
 set -eu
-export CARDANO_NODE_SOCKET_PATH=/node.socket
-cli() { cardano-cli conway "$@"; }
 MAGIC=${1:?usage: p1-fund.sh <magic>}
-cd "${P0_DIR:-/tmp/p0}"
+. /tmp/p0-scripts/p0-lib.sh                       # sets W (= $P0_DIR), cli, tx_visible, wait_settled ...; cd to W
 [ -f funded ] && { echo "gateways A and B already funded"; exit 0; }
 ADMIN=$(cat admin.addr)
+if [ -f fund.signed ]; then                       # an earlier run sent the funding: is it in a block now?
+  OLD_ID=$(cli transaction txid --tx-file fund.signed | grep -o '[0-9a-f]\{64\}')
+  if tx_visible "$OLD_ID"; then
+    touch funded; echo "gateways A and B were funded by an earlier run (tx $OLD_ID)"; exit 0
+  fi
+fi
 
 # the biggest pure-lovelace coin of the administrator: IN = txid#index, VAL = its lovelace
 read -r IN VAL < <(cli query utxo --address "$ADMIN" --output-json --testnet-magic "$MAGIC" \
@@ -24,11 +32,5 @@ cli transaction build-raw --fee $FEE --tx-in "$IN" \
 cli transaction sign --tx-body-file fund.raw --signing-key-file admin.skey --out-file fund.signed
 FID=$(cli transaction txid --tx-file fund.signed | grep -o '[0-9a-f]\{64\}')
 cli transaction submit --tx-file fund.signed --testnet-magic "$MAGIC" > /dev/null
-
-# wait (up to 60 s) until the funding transaction is in a block
-n=0
-until cli query utxo --tx-in "$FID#0" --output-json --testnet-magic "$MAGIC" 2>/dev/null | grep -q lovelace; do
-  sleep 0.5; n=$((n+1))
-  [ $n -gt 120 ] && { echo "funding tx not seen"; exit 1; }
-done
+wait_settled "$FID" fund.signed || { echo "funding tx not seen"; exit 1; }
 touch funded; echo "funded gateways A and B (tx $FID)"
