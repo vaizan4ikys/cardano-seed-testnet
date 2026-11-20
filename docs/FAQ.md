@@ -76,6 +76,6 @@ Because the block it was in can be dropped. This is a normal part of Cardano, no
 
 **What follows from this:**
 
-* The newest block or two can still be replaced. Only a block with 60 more blocks on top is "Final" ([question 3](#3-how-fast-is-data-final-and-what-does-final-mean)); that is why the page shows "Settling n / 60" and why our scripts wait for it.
+* The newest block or two can still be replaced. Only a block with 60 more blocks on top is "Final" ([question 3](#3-how-fast-is-data-final-and-what-does-final-mean)); that is why the page shows "Settling n / 60" and why the gateway keeps every batch until then (the setup scripts and the registry changes wait for only one more block).
 * Our scripts do not trust "it was in a block": while they wait, every 10 s they check whether the transaction is in a block or still waiting in the mempool, and if it is neither they send the same transaction again; the registry changes, the registry mint and the funding transactions also wait for one more block on top; and the gateway keeps every batch until it is final (60 blocks) and sends it again if it is gone from the chain.
 * Sending the same signed transaction again is safe. It has one fixed transaction ID and spends fixed inputs, so it can be in the chain only once: a node that already has it in a block, or whose inputs are already spent, rejects the second copy and nothing is paid twice.
