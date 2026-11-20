@@ -1,7 +1,7 @@
 #!/bin/bash
 # Sourced (not run) by the other p0-*.sh and p1-*.sh scripts INSIDE pool 1's container. The caller sets MAGIC first.
 # After sourcing: the current folder is the work folder W (= $P0_DIR, default /tmp/p0), and these exist:
-#   cli, tx_visible, wait_tx, wait_settled, tip_block, now_ms, biggest_pure_coin, min_fee, gw_utxos, mk_data_tx,
+#   cli, tx_visible, wait_tx, wait_settled, tip_block, wait_next_block, now_ms, biggest_pure_coin, min_fee, gw_utxos, mk_data_tx,
 #   submit_tx, short_err, live_coin, find_registry, registry_coin, swap_registry, plutus_err, and the variables
 #   PW (policy id of gateway_write; empty before gateway_write.plutus exists), RHEX ("RECEIPT" in hex),
 #   EXU, EXU_STEPS, EXU_MEM (execution units we declare).
@@ -86,6 +86,18 @@ wait_tx() {
   return 0
 }
 tip_block() { cli query tip --testnet-magic "$MAGIC" | jq -r .block; }
+# wait_next_block [MAX_SECONDS]: wait until the chain has one more block (at most MAX seconds, default 20).
+# Returns 0 when a new block came, 1 when none came in time.
+wait_next_block() {
+  local max=${1:-20} start=$SECONDS seen tip
+  seen=$(tip_block 2>/dev/null)
+  while [ $((SECONDS - start)) -lt "$max" ]; do
+    sleep 1
+    tip=$(tip_block 2>/dev/null)
+    [ "${tip:-0}" -gt "${seen:-0}" ] 2>/dev/null && return 0
+  done
+  return 1
+}
 # wait_settled TXID SIGNED_FILE: wait until the tx is in a block AND one more block is on top of it, and resend the
 # signed file if the tx vanishes. Why: a block that carried our tx can still be replaced by an equally long block from
 # another pool (a slot battle); the tx is then gone, and a script that already said "done" would be wrong.
