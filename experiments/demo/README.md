@@ -173,6 +173,7 @@ Use the time for questions: click a sensor card (graph), **Verify** on a batch i
 
 The table below was measured with the **old 6-step flow** (batch every 10 s, silent after 40 s, one pause per step, with the old step "one sensor goes silent").
 The new live part (`--show`, batch every 5 s, silent after 30 s) is designed for 1.5 to 2 minutes; measured on 19 November 2026 on an Ubuntu 20.04 arm64 VM (2 CPUs, 4 GB RAM), local mode: 1 min 48 s, 1 min 29 s and 1 min 6 s in three runs, all steps PASS (the time depends on when the next blocks come). Per step: 2 refused 7-8 s, 3 approve GW02 9-25 s, 4 revoke GW01 32-49 s (the 30 s silent limit), 5 approve again 4-28 s; `--prepare` 25-60 s; `--step 6` 14-44 s.
+With the resending and the wait for one more block on each registry change (20 November 2026, same VM, local mode, 10 `--show` runs one after the other, all steps PASS): 80 to 96 s, 89 s on average; per step: 2 refused 7-8 s, 3 approve GW02 10-25 s, 4 revoke GW01 33-40 s, 5 approve again 15-23 s. No transaction had to be sent again in these runs. A `--show` that follows an earlier one first revokes the earlier GW02 (12 to 50 s more, not counted in the live time); after `--prepare` this is not needed.
 
 Rehearsal on the live chain, 12 November 2026, Mac mode, 10 sensors, B=100, T=10 s:
 

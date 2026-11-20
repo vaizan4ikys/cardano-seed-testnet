@@ -39,7 +39,8 @@
 #                            --dry-run works with --from (it lists only the steps from N on).
 #   Each transaction step (5, 7, 8) waits until its transaction is in a block AND one more block is on top, and sends
 #   the same signed transaction again when it gets lost (on this chain about 6 % of the forged blocks are replaced by another one).
-#   --from and these waits are NOT yet run for real on the VM (only checked with bash -n and --dry-run).
+#   Run for real on 20 November 2026 (Ubuntu 20.04 arm64 VM, local mode): --yes (every step OK, preflight all PASS) and
+#   --from 4 --yes on the running chain (steps 5, 7 and 8 found their earlier work and sent nothing). Not run in Mac -> VM mode.
 #
 # Mac -> seedvm mode TESTED END TO END on 13 November 2026 (run for real with --yes: every step OK, preflight all PASS).
 # Local mode was run for real on 19 November 2026 on an Ubuntu 20.04 arm64 VM as a new user (every step OK, preflight
