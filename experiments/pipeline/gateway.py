@@ -135,15 +135,17 @@ def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], 
             except (OSError, subprocess.TimeoutExpired) as e:
                 log("submit command failed to run: %s" % e)
                 return False
-            tail = (r.stdout + r.stderr).strip()[-300:]
+            # The reason is the last line on stdout (p1-batch.sh prints one readable sentence there); its notes
+            # ("sent the same transaction again", "registry.ref pointed to a coin that is gone ...") are on stderr.
+            # So stderr goes FIRST into the tail: its last line is then the reason, not a note.
+            tail = "\n".join(x.strip() for x in (r.stderr, r.stdout) if x.strip())[-300:]
             if r.returncode == EXIT_REFUSED:
                 log("REFUSED, not retried: %s" % (tail.splitlines()[-1] if tail else "exit code 2"))
                 return "refused"
             if r.returncode != EXIT_SENT:
                 log("submit command exit %d: %s" % (r.returncode, tail))
                 return False
-            # On success stderr is normally empty; p1-batch.sh writes its notes there ("sent the same transaction
-            # again", "registry.ref pointed to a coin that is gone ..."). Show them, the last few only.
+            # On success stderr is normally empty. Show its notes, the last few only.
             for note in r.stderr.strip().splitlines()[-NOTE_LINES:]:
                 log("note from the submit command for %s: %s" % (os.path.basename(path), note.strip()))
             return find_txid(r.stdout, h) or True

@@ -167,6 +167,20 @@ class TestFindTxid(unittest.TestCase):
         sub = gateway.make_submit("command", "sh -c \"echo '%s' >&2\" x" % notes[1], log=quiet)
         self.assertIs(sub("file.json", self.H), True)
 
+    def test_a_refusal_shows_the_reason_not_the_note(self):
+        """Seen on the VM: the REFUSED line showed the stderr note "registry.ref pointed to ..." instead of the reason."""
+        logs = []
+        script = ("echo 'note: registry.ref pointed to a coin that is gone' >&2; "
+                  "echo 'REFUSED by the contract: gateway A is not on the registry list'; exit 2")
+        sub = gateway.make_submit("command", "sh -c \"%s\" x" % script, log=logs.append)
+        self.assertEqual(sub("/x/b.json", self.H), "refused")
+        self.assertEqual(logs, ["REFUSED, not retried: REFUSED by the contract: gateway A is not on the registry list"])
+        logs.clear()
+        script = "echo 'a note' >&2; echo 'submit failed: BadInputsUTxO'; exit 1"
+        sub = gateway.make_submit("command", "sh -c \"%s\" x" % script, log=logs.append)
+        self.assertIs(sub("/x/b.json", self.H), False)
+        self.assertEqual(logs, ["submit command exit 1: a note\nsubmit failed: BadInputsUTxO"])
+
     def test_notes_of_a_successful_submit_are_logged(self):
         """A resend inside p1-batch.sh must show up in the gateway log, not only a failure."""
         logs = []
