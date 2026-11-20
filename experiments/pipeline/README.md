@@ -172,6 +172,10 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
   logged `no longer in the chain` and sent the file again; `p1-batch.sh` found the real transaction in the chain
   (`already sent`, nothing new built), the gateway logged `sent again: ... (new transaction 732d7a79ba66..., resend 1)`
   with the real id, and the batch became final. `check_batches.py`: 101 of 101 batches final, 0 lost, 0 twice.
+  Two runs of `p1-batch.sh` for the same batch at once (as after a killed gateway whose first run still works in the
+  container; the second started 0.2, 0.5 or 1.0 s after the first): the batch is on the chain once, the second run
+  answers `already sent`. (Before `p1-batch.sh` checked this again after waiting for a block, the 0.2 s case put the
+  batch on the chain twice.)
 * **Options:** `--kupo URL` (default `$KUPO_URL`; without it nothing is followed and a warning is logged), `--final-blocks 60`,
   `--confirm-interval 15`, `--missing-grace 60`, `--container` and `--magic` (for the node tip, as in `server.py`).
 
