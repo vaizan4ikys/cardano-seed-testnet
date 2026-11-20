@@ -167,6 +167,25 @@ class TestFindTxid(unittest.TestCase):
         sub = gateway.make_submit("command", "sh -c \"echo '%s' >&2\" x" % notes[1], log=quiet)
         self.assertIs(sub("file.json", self.H), True)
 
+    def test_notes_of_a_successful_submit_are_logged(self):
+        """A resend inside p1-batch.sh must show up in the gateway log, not only a failure."""
+        logs = []
+        ok = "OK: gateway A batch %s is in a block: tx %s (size 1500 bytes)" % (self.H, txid_of(5))
+        script = ("echo '%s'; echo '  the transaction was lost (not in a block, not in the mempool): sent the same "
+                  "transaction again' >&2" % ok)
+        sub = gateway.make_submit("command", "sh -c \"%s\" x" % script, log=logs.append)
+        self.assertEqual(sub("/x/batch-1.json", self.H), txid_of(5))
+        self.assertEqual(logs, ["note from the submit command for batch-1.json: the transaction was lost (not in a "
+                                "block, not in the mempool): sent the same transaction again"])
+        logs.clear()
+        quiet_ok = gateway.make_submit("command", "sh -c \"echo '%s'\" x" % ok, log=logs.append)
+        quiet_ok("/x/batch-2.json", self.H)
+        self.assertEqual(logs, [])                              # nothing on stderr: nothing extra in the log
+        many = gateway.make_submit("command", "sh -c 'for i in 1 2 3 4 5 6 7; do echo n$i >&2; done' x",
+                                   log=logs.append)
+        many("/x/b.json", self.H)
+        self.assertEqual([m.split(": ")[-1] for m in logs], ["n3", "n4", "n5", "n6", "n7"])   # the last 5 only
+
 
 class TestFollowToFinal(FollowCase):
     def test_in_a_block_then_final(self):

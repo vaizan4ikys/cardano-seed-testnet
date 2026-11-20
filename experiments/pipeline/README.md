@@ -122,7 +122,7 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
   The submit command returns 0 as soon as the transaction is in a block, so without more care the batch (about 100
   readings) would be lost and nobody would notice.
 * **What the gateway does** (needs `--kupo URL`; `demo.sh` passes it). It keeps the transaction id of every submitted batch
-  (the last 64-hex word of the last line the submit command prints on stdout; notes on stderr are ignored), writes it into `batch-....json.tx` and sets the
+  (the last 64-hex word of the last line the submit command prints on stdout; its notes on stderr are only logged, see below), writes it into `batch-....json.tx` and sets the
   status to **settling**. Every `--confirm-interval` seconds (15) it asks Kupo about each settling batch:
   in a block: how many blocks are on top; at `--final-blocks` (60 = k) the status becomes **final**.
   Not listed by Kupo for longer than `--missing-grace` seconds (60; Kupo is normally less than a second behind the node):
@@ -159,6 +159,8 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
   (how often the batch was sent again). A restart keeps all of this: the settling batches are followed on.
 * **Log lines:** `sent: FILE (transaction ...)`, `final: FILE (transaction ..., 60 blocks deep)`, `batch X: its transaction is no
   longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)` (only `sent: ` lines are new batches).
+  `note from the submit command for FILE: ...` shows what `p1-batch.sh` said on stderr while it succeeded (the last 5
+  lines), for example `the transaction was lost (not in a block, not in the mempool): sent the same transaction again`.
 * **Options:** `--kupo URL` (default `$KUPO_URL`; without it nothing is followed and a warning is logged), `--final-blocks 60`,
   `--confirm-interval 15`, `--missing-grace 60`, `--container` and `--magic` (for the node tip, as in `server.py`).
 

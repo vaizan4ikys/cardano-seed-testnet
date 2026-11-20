@@ -69,6 +69,7 @@ MAX_WARNED = 1000       # at most this many "first problem of a sensor" log line
 MAX_LINE = 65536        # longest line accepted from a sensor (bytes)
 SUBMIT_TIMEOUT = 120    # seconds a submit command may run
 EXIT_SENT, EXIT_REFUSED = 0, 2     # exit codes of the submit command (anything else = failed, retry later)
+NOTE_LINES = 5          # at most this many stderr lines of a successful submit command are logged
 FINAL_BLOCKS = 60       # blocks on top of a transaction until it is final (k of this chain)
 CONFIRM_INTERVAL = 15   # seconds between two looks at the batches that are not final yet
 MISSING_GRACE = 60      # seconds a transaction may be missing in Kupo before the batch is sent again
@@ -141,6 +142,10 @@ def make_submit(mode: str, template: Optional[str] = None, log: Callable[[str], 
             if r.returncode != EXIT_SENT:
                 log("submit command exit %d: %s" % (r.returncode, tail))
                 return False
+            # On success stderr is normally empty; p1-batch.sh writes its notes there ("sent the same transaction
+            # again", "registry.ref pointed to a coin that is gone ..."). Show them, the last few only.
+            for note in r.stderr.strip().splitlines()[-NOTE_LINES:]:
+                log("note from the submit command for %s: %s" % (os.path.basename(path), note.strip()))
             return find_txid(r.stdout, h) or True
         return submit
     raise ValueError("unknown submit mode: %s" % mode)
