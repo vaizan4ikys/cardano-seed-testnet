@@ -9,10 +9,12 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
 import calc_size
+import check_batches
 import gateway
 import layout
 import sensor
@@ -428,6 +430,124 @@ class TestGatewayRobustness(TmpDirCase):
         self.assertEqual(gw.buf, [])
 
 
+class TestNoReadingLost(TmpDirCase):
+    """The ways a reading could get lost on its way to a batch: gateway crash, chain down, sensor cut off."""
+
+    def make(self, B=100, T=10, submit=None, **kw):
+        return gateway.Gateway(self.dir, B, T, submit or gateway.make_submit("dry", log=quiet),
+                               clock=FakeClock(), log=quiet, **kw)
+
+    def readings_in_batches(self):
+        found = []
+        for name in self.batches():
+            found += [(r["sensor"], r["seq"]) for r in layout.decode_batch(json.loads(slurp(os.path.join(self.dir, name))))]
+        return found
+
+    def test_a_crash_does_not_lose_the_waiting_readings(self):
+        gw = self.make()
+        for i in range(1, 4):
+            gw.add_reading(reading(seq=i))
+        del gw                                            # crash: no shutdown, nothing flushed
+        gw2 = self.make()
+        self.assertEqual([r["seq"] for _, r in gw2.buf], [1, 2, 3])
+        self.assertEqual(gw2.add_reading(reading(seq=2)), "dup")     # the sensor sends one again: known
+        gw2.flush_now()
+        self.assertEqual(self.readings_in_batches(), [("AGRI_001", 1), ("AGRI_001", 2), ("AGRI_001", 3)])
+        self.assertEqual(slurp(os.path.join(self.dir, gateway.JOURNAL)), b"")    # nothing waits any more
+        self.assertEqual(self.make().buf, [])                         # and a third start finds nothing
+
+    def test_a_crash_right_after_a_batch_file_does_not_send_it_twice(self):
+        gw = self.make()
+        for i in range(1, 4):
+            gw.add_reading(reading(seq=i))
+        gw._save_state = lambda: None                    # crash after the batch file, before state.json and journal
+        gw._rewrite_journal = lambda: None
+        gw.flush_now()
+        self.assertEqual(len(self.batches()), 1)
+        gw2 = self.make()
+        self.assertEqual(gw2.buf, [])                    # the 3 readings are in the batch file: not again
+        self.assertEqual(gw2.next_batch, 2)
+        self.assertEqual(gw2.add_reading(reading(seq=4)), "ok")
+
+    def test_a_batch_is_tried_until_the_chain_takes_it(self):
+        calls = []
+        def failing(path, h):
+            calls.append(h)
+            return len(calls) > 30                        # the chain is down for 30 tries
+        gw = self.make(B=1, submit=failing)
+        gw.add_reading(reading(seq=1))
+        for _ in range(30):
+            gw.send_pending()
+        self.assertEqual(len(gw.pending_files()), 1)
+        self.assertFalse(os.path.isdir(os.path.join(self.dir, "dead")))
+        gw.send_pending()
+        self.assertEqual(gw.pending_files(), [])
+        self.assertEqual(gw.stats["dead"], 0)
+
+    def test_refused_by_the_contract_still_goes_to_dead(self):
+        gw = self.make(B=1, submit=lambda path, h: "refused")
+        gw.add_reading(reading(seq=1))
+        gw.send_pending()
+        self.assertEqual(len(os.listdir(os.path.join(self.dir, "dead"))), 2)       # batch and status
+
+    def serve(self, gw, port):
+        srv = gateway.Server(("127.0.0.1", port), gateway.Handler)
+        srv.gw = gw
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return srv
+
+    def test_every_reading_is_confirmed(self):
+        port = free_port()
+        gw = self.make()
+        self.serve(gw, port)
+        sink = sensor.Sink("127.0.0.1", port, False)
+        for i in range(1, 31):
+            sink.send(json.dumps(reading(seq=i)))
+        self.assertEqual(sink.finish(5), 0)
+        self.assertEqual((sink.sent, sink.bad, gw.stats["received"]), (30, 0, 30))
+
+    def test_readings_wait_while_the_gateway_is_away(self):
+        port = free_port()
+        sink = sensor.Sink("127.0.0.1", port, False)
+        for i in range(1, 6):
+            sink.send(json.dumps(reading(seq=i)))         # nobody listens yet
+        self.assertEqual((len(sink.waiting), sink.sent, sink.dropped), (5, 0, 0))
+        gw = self.make()
+        self.serve(gw, port)                              # the gateway starts
+        sink.send(json.dumps(reading(seq=6)))
+        self.assertEqual(sink.finish(5), 0)
+        self.assertEqual(sink.sent, 6)
+        self.assertEqual(sorted(r["seq"] for _, r in gw.buf), [1, 2, 3, 4, 5, 6])
+
+    def test_a_reading_sent_twice_is_stored_once(self):
+        port = free_port()
+        gw = self.make()
+        self.serve(gw, port)
+        for _ in range(2):                                # e.g. the answer was lost and the sensor sends it again
+            sink = sensor.Sink("127.0.0.1", port, False)
+            sink.send(json.dumps(reading(seq=7)))
+            self.assertEqual(sink.finish(5), 0)
+            self.assertEqual(sink.sent, 1)
+        self.assertEqual((gw.stats["received"], gw.stats["dup"]), (1, 1))
+
+    def test_bad_lines_get_an_answer_too(self):
+        port = free_port()
+        gw = self.make()
+        self.serve(gw, port)
+        sink = sensor.Sink("127.0.0.1", port, False)
+        sink.send("not json")
+        sink.send(json.dumps(reading(seq=1)))
+        self.assertEqual(sink.finish(5), 0)
+        self.assertEqual((sink.sent, sink.bad), (1, 1))
+
+    def test_check_finds_a_missing_reading(self):
+        entries = [{"readings": {("GW01", "AGRI_001", s) for s in (1, 2, 3, 5, 6)}},
+                   {"readings": {("GW01", "AGRI_002", s) for s in (10, 11, 5000, 5001)}}]   # 5000: restarted
+        self.assertEqual(check_batches.missing_readings(entries), [("GW01", "AGRI_001", 1, [4])])
+
+
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -475,6 +595,46 @@ class TestEndToEnd(TmpDirCase):
         self.assertIn("wait of oldest", log)
         silent = [s for s, _ in seen if s == "AGRI_004"]
         self.assertTrue(len(silent) < total / 4)          # the silent sensor sent less than its share
+
+    def test_kill_9_of_the_gateway_loses_no_reading(self):
+        port = free_port()
+        out = os.path.join(self.dir, "outbox")
+        def start_gateway():                              # B and T large: the readings wait in buffer.jsonl
+            proc = subprocess.Popen([sys.executable, os.path.join(HERE, "gateway.py"), "--B", "1000", "--T", "30",
+                                     "--listen-port", str(port), "--outbox", out, "--submit", "dry"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(50):
+                try:
+                    socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+                    return proc
+                except OSError:
+                    time.sleep(0.1)
+            return proc
+        gw = start_gateway()
+        sn = subprocess.Popen([sys.executable, os.path.join(HERE, "sensor.py"), "--sensors", "3", "--interval", "0.1",
+                               "--duration", "5", "--port", str(port), "--seed", "7"],
+                              stderr=subprocess.PIPE, text=True)
+        try:
+            time.sleep(1.5)
+            gw.kill()                                     # kill -9: no flush, no goodbye
+            gw.wait()
+            time.sleep(1.5)                               # the sensors go on measuring; the readings wait
+            gw = start_gateway()
+            err = sn.communicate(timeout=30)[1]
+        finally:
+            sn.kill()
+            gw.send_signal(signal.SIGTERM)                # a normal stop writes the buffer as a batch
+            gw.wait(timeout=30)
+        self.assertIn(" 0 not confirmed, 0 dropped", err)
+        confirmed = int(err.split("sent ")[1].split()[0])
+        seqs = {}
+        for f in os.listdir(out):
+            if f.startswith("batch-") and f.endswith(".json"):
+                for r in layout.decode_batch(json.loads(slurp(os.path.join(out, f)))):
+                    seqs.setdefault(r["sensor"], []).append(r["seq"])
+        self.assertEqual(sum(len(v) for v in seqs.values()), confirmed, err)
+        for sensor_id, found in seqs.items():            # every number from 1 to the last one, each once
+            self.assertEqual(sorted(found), list(range(1, max(found) + 1)), sensor_id)
 
 
 if __name__ == "__main__":

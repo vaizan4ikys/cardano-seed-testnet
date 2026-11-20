@@ -11,6 +11,11 @@ Every batch file of the outbox ends in exactly one group:
   dead      in dead/: refused for good (for example the gateway is not approved) or failed too often
             (some may have been sent before); not in the chain
   LOST      the gateway says "sent", but the batch is NOT in the chain: the readings are gone
+Also checked: every reading of every sensor is in a batch file. Sensors number their readings 1, 2, 3, ... (from their
+--seq-start); a number missing between two numbers of the same sensor run means that reading never got into a batch
+(lost between the sensor and the gateway). A jump of RESTART_JUMP or more is a sensor restarted with a new
+--seq-start, not a loss. (Readings lost after the last one in a batch are not seen here; sensor.py prints them as
+"not confirmed".)
 Also counted: batches that are on the chain TWICE (in two different transactions). That must never happen (p1-batch.sh
 does not build a second transaction while the first one can still land); if it does, the readings are there twice and
 the fee was paid twice.
@@ -24,7 +29,8 @@ How deep it is: a batch the new gateway has seen in a block has its block number
 estimate is used (reader.estimated_block: tip block and slots). The tip comes from docker exec (reader.DockerTip); where
 docker is not available, from Kupo's slot (about 0.2 blocks per slot): then "settling/final" is only approximate.
 
-Exit code: 0 = nothing LOST and nothing twice, 1 = something LOST or on the chain twice, 2 = Kupo cannot be read. Standard library only.
+Exit code: 0 = nothing LOST, no reading missing and nothing twice, 1 = something LOST, missing or on the chain twice,
+2 = Kupo cannot be read. Standard library only.
 """
 from __future__ import annotations
 
@@ -41,6 +47,8 @@ import reader
 FINAL, SETTLING, PENDING, DEAD, LOST = "final", "settling", "pending", "dead", "LOST"
 GROUPS = (FINAL, SETTLING, PENDING, DEAD, LOST)
 SENT_WORDS = ("sent", "settling", "final")       # status words of a batch the gateway has submitted
+RESTART_JUMP = 1000     # a jump of this many sequence numbers or more is a new run of the sensor, not a loss
+SHOW_MISSING = 5        # missing sequence numbers listed per sensor
 
 
 def read_outbox(outbox: str, gateway_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -65,6 +73,27 @@ def read_outbox(outbox: str, gateway_id: Optional[str] = None) -> List[Dict[str,
                             "gateway": parsed["gateway"],
                             "readings": {(parsed["gateway"], r["sensor"], r["seq"]) for r in parsed["readings"]}})
     return sorted(entries, key=lambda e: e["name"])
+
+
+def missing_readings(entries: List[Dict[str, Any]]) -> List[Tuple[str, str, int, List[int]]]:
+    """Readings that never got into a batch file: per (gateway, sensor) the sequence numbers missing between two
+    numbers of the same run (all batch files count, dead ones too). Rows (gateway, sensor, how many, the first
+    SHOW_MISSING of them), only for sensors with something missing."""
+    seqs = {}
+    for e in entries:
+        for gateway, sensor, seq in e["readings"]:
+            seqs.setdefault((gateway, sensor), set()).add(seq)
+    rows = []
+    for (gateway, sensor), found in sorted(seqs.items()):
+        ordered = sorted(found)
+        missing, count = [], 0
+        for a, b in zip(ordered, ordered[1:]):
+            if 1 < b - a < RESTART_JUMP:
+                count += b - a - 1
+                missing.extend(range(a + 1, min(b, a + 1 + SHOW_MISSING)))
+        if count:
+            rows.append((gateway, sensor, count, missing[:SHOW_MISSING]))
+    return rows
 
 
 def read_words(path: str) -> List[str]:
@@ -228,6 +257,16 @@ def report(entries: List[Dict[str, Any]], final_blocks: int, show_list: bool) ->
             lines.append("  ... (--list shows all)")
     else:
         lines.append("OK: no batch is lost")
+    sensors = {(g, sensor) for e in entries for g, sensor, _ in e["readings"]}
+    missing = missing_readings(entries)
+    if missing:
+        lines.append("MISSING: %d readings never got into a batch (lost between sensor and gateway):"
+                     % sum(row[2] for row in missing))
+        for gateway, sensor, count, first in missing:
+            lines.append("  %s %s: %d (seq %s%s)" % (gateway, sensor, count, ", ".join(map(str, first)),
+                                                   ", ..." if count > len(first) else ""))
+    else:
+        lines.append("OK: no reading missing (%d sensors: every sequence number is in a batch)" % len(sensors))
     return "\n".join(lines)
 
 
@@ -262,7 +301,8 @@ def main() -> int:
         return 2
     print("outbox %s, gateway %s, Kupo %s, %s" % (a.outbox, a.gateway_id or "(any)", a.kupo, tip_text))
     print(report(entries, a.final_blocks, a.list))
-    return 1 if any(e["group"] == LOST or e["copies"] > 1 for e in entries) else 0
+    bad = any(e["group"] == LOST or e["copies"] > 1 for e in entries) or missing_readings(entries)
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

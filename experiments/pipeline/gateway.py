@@ -8,12 +8,23 @@ reading per line; the gateway checks them (layout.py), drops duplicates, writes 
   python3 gateway.py --submit command --submit-command "./submit.sh {file} {hash}" --kupo http://10.150.0.71:1442
   python3 gateway.py --help          all options with their defaults
 
+No reading is given up on the way (only the contract can refuse a batch, see dead/):
+  * The gateway answers every reading line with one line, sent only when the reading is safe on disk: "ok" (stored),
+    "dup" (stored before: the sensor sent it again) or "bad" (not a valid reading, never stored). The sensor keeps a
+    reading until it has the answer, and sends it again after a reconnect (sensor.py).
+  * A reading that waits for its batch is in buffer.jsonl first; after a crash or a kill -9 the next start puts it
+    back into the buffer.
+  * A batch whose submit fails (node down, network cut) is tried again every --retry seconds until it works
+    (--max-tries 0, the default). Only a refusal by the contract (exit code 2) moves it to dead/.
+
 A batch is written when B readings are collected or the oldest reading has waited T seconds.
 Outbox files:   batch-000017-<sha256>.json          the metadata (never changed)
                 batch-000017-<sha256>.json.status   "pending", "settling", "final" or "sent" (see below)
                 batch-000017-<sha256>.json.tx       the transaction of a "settling" or "final" batch (JSON)
                 state.json                          sequence numbers seen, next batch number
-                dead/                               batches that failed --max-tries submits (not tried again)
+                buffer.jsonl                        the readings that wait for their batch (one JSON line each)
+                dead/                               batches refused by the contract (or failed --max-tries submits,
+                                                    if --max-tries is set); not tried again
 After a restart every batch that is "pending" is submitted again (same file, same hash).
 Exit codes of the submit command: 0 = sent, 2 = REFUSED for good (for example the contract does not accept this
 gateway): the batch goes to dead/ at once, without retries; any other code = failed, try again later.
@@ -34,14 +45,13 @@ replaced block back. The states:
              thread then submits it again like any new batch (oldest first, because every batch spends the coin
              of the one before): same file, same hash, a new transaction. The check never waits for a submit, so
              new batches are not held up. A resend that is refused for good goes to dead/ like a first submit; one
-             that failed --max-tries times goes to dead/ too, unless its transaction is in the chain after all.
+             that failed --max-tries times (if set) goes to dead/ too, unless its transaction is in the chain.
   final      the transaction is final: nothing more to do (the files stay as the record)
   sent       submitted, but not followed: dry mode, no --kupo, or no transaction id in the output of the submit
              command (the old gateway wrote only this). Such a batch is not checked.
 A restart keeps the settling batches and goes on with them. The node tip comes from reader.DockerTip (docker exec).
 check_batches.py reads an outbox and the chain and tells whether every batch arrived.
-The readings that wait in memory for their batch are lost if the process is killed
-(Ctrl-C and SIGTERM write them out first). On Ctrl-C or SIGTERM the pending batches are still submitted for at most
+On Ctrl-C or SIGTERM the pending batches are still submitted for at most
 STOP_SEND (20) seconds; the submit that runs then is finished; the rest stays pending and is sent at the next start.
 (Every batch waits for a block, so a gateway that is behind would otherwise need a block per waiting batch to stop.)
 """
@@ -76,6 +86,9 @@ FINAL_BLOCKS = 60       # blocks on top of a transaction until it is final (k of
 CONFIRM_INTERVAL = 15   # seconds between two looks at the batches that are not final yet
 MISSING_GRACE = 60      # seconds a transaction may be missing in Kupo before the batch is sent again
 STOP_SEND = 20          # seconds after Ctrl-C / SIGTERM in which pending batches are still submitted
+JOURNAL = "buffer.jsonl"   # in the outbox: the readings that wait for their batch (survive a crash)
+LOG_FIRST_TRIES = 5     # a batch that cannot be sent: log each of its first tries, then only every LOG_TRIES_EVERY
+LOG_TRIES_EVERY = 12
 TXID_RE = re.compile(r"\b[0-9a-f]{64}\b")
 IN_PROGRESS = ("sent", "settling", "final")     # status words of a batch that was submitted (not "pending")
 
@@ -165,7 +178,7 @@ class Gateway:
 
     def __init__(self, outbox: str, B: int, T: float, submit: Submit, gateway_id: str = "GW01",
                  clock: Callable[[], float] = time.monotonic, log: Callable[[str], None] = default_log,
-                 tx_reserve: int = layout.TX_RESERVE, max_tries: int = 5,
+                 tx_reserve: int = layout.TX_RESERVE, max_tries: int = 0,
                  view: Optional[confirm.ChainView] = None, final_blocks: int = FINAL_BLOCKS,
                  missing_grace: float = MISSING_GRACE):
         if not layout.valid_id(gateway_id):
@@ -178,6 +191,7 @@ class Gateway:
         self.view_problem = None          # why the last look at the chain failed (logged once)
         os.makedirs(outbox, exist_ok=True)
         self.state_path = os.path.join(outbox, "state.json")
+        self.journal_path = os.path.join(outbox, JOURNAL)
         self.lock = threading.RLock()
         self.send_lock = threading.Lock()
         self.buf = []                     # (arrival time, reading)
@@ -193,6 +207,7 @@ class Gateway:
         self.threads = []
         self.stop_by = None               # self.clock time from which no new submit starts (set by shutdown)
         self._load_state()
+        self._replay_journal()
 
     # state ------------------------------------------------------------
     def _load_state(self):
@@ -205,10 +220,72 @@ class Gateway:
         except (OSError, ValueError, KeyError):
             pass
         self.maxseq = {k: max(v) for k, v in self.seen.items() if v}
-        for p in (glob.glob(os.path.join(self.outbox, "batch-*.json")) +
-                  glob.glob(os.path.join(self.outbox, "dead", "batch-*.json"))):   # state file lost: use the files
-            n = int(os.path.basename(p).split("-")[1])
-            self.next_batch = max(self.next_batch, n + 1)
+        self.saved_next_batch = self.next_batch    # batch files from this number on were written after state.json
+        for p in self._batch_paths():              # state file lost or old: use the files
+            self.next_batch = max(self.next_batch, self._batch_number(p) + 1)
+
+    def _batch_paths(self) -> List[str]:
+        """Every batch file of the outbox and of dead/."""
+        return (glob.glob(os.path.join(self.outbox, "batch-*.json")) +
+                glob.glob(os.path.join(self.outbox, "dead", "batch-*.json")))
+
+    @staticmethod
+    def _batch_number(path: str) -> int:
+        """17 for batch-000017-<hash>.json."""
+        return int(os.path.basename(path).split("-")[1])
+
+    def _replay_journal(self):
+        """Put the readings of buffer.jsonl back into the buffer. They were received (and confirmed to the sensor),
+        but the gateway stopped before they were in a batch file. A reading that is in a batch file already is
+        skipped: either state.json knows it (seen), or the gateway stopped after writing the batch file and before
+        writing state.json (then it is in a batch file numbered saved_next_batch or higher)."""
+        try:
+            with open(self.journal_path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return
+        in_files = set()
+        for p in self._batch_paths():
+            if self._batch_number(p) >= self.saved_next_batch:
+                try:
+                    with open(p, "rb") as f:
+                        obj = json.loads(f.read())
+                    in_files |= {(r["sensor"], r["seq"]) for r in layout.decode_batch(obj)}
+                except (OSError, ValueError, KeyError, TypeError) as e:
+                    self.log("WARNING cannot read %s while restoring the buffer: %s" % (os.path.basename(p), e))
+        back = 0
+        for line in lines:
+            try:
+                r = layout.parse_reading(json.loads(line))
+            except (ValueError, TypeError):     # a line cut by the crash (json errors are ValueErrors too)
+                continue
+            sid, seq = r["sensor_id"], r["seq"]
+            if (sid, seq) in in_files or seq in self.seen.get(sid, ()):
+                continue
+            self.seen.setdefault(sid, set()).add(seq)
+            self.maxseq[sid] = max(self.maxseq.get(sid, -1), seq)
+            self.buf.append((self.clock(), r))
+            back += 1
+        if back:
+            self.log("%d reading(s) from %s put back into the buffer (received before the last stop, not in a "
+                     "batch yet)" % (back, JOURNAL))
+        self._rewrite_journal()
+
+    def _journal_add(self, r: layout.Reading) -> None:
+        """Append one reading to buffer.jsonl and make sure it is on disk (raises OSError)."""
+        with open(self.journal_path, "a") as f:
+            f.write(json.dumps(r, separators=(",", ":")) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    def _rewrite_journal(self) -> None:
+        """buffer.jsonl = the readings that are in the buffer now (after a flush: usually none). If this fails, the
+        old journal stays; it holds more readings, and the ones already in batches are skipped at the next start."""
+        data = "".join(json.dumps(r, separators=(",", ":")) + "\n" for _, r in self.buf)
+        try:
+            write_atomic(self.journal_path, data.encode())
+        except OSError as e:
+            self.log("ERROR cannot write %s: %s" % (JOURNAL, e))
 
     def _save_state(self):
         """Write state.json (only the last WINDOW sequence numbers of every sensor)."""
@@ -236,7 +313,8 @@ class Gateway:
                      % (key, err))
 
     def add_reading(self, raw: object, now: Optional[float] = None) -> str:
-        """Check one received reading and put it into the buffer. Returns "ok", "dup", "bad" or "closed"."""
+        """Check one received reading and put it into the buffer (and into buffer.jsonl first). Returns "ok", "dup",
+        "bad", or "closed" / "busy" (not stored: stopping / the journal cannot be written; the sensor keeps it)."""
         with self.lock:
             if self.closed:
                 self.stats["late"] += 1
@@ -258,6 +336,13 @@ class Gateway:
             if r["seq"] in s:
                 self.stats["dup"] += 1
                 return "dup"
+            try:
+                self._journal_add(r)
+            except OSError as e:            # not on disk: not accepted, the sensor sends it again later
+                if "journal" not in self.warned:
+                    self.warned.add("journal")
+                    self.log("ERROR cannot write %s (%s): readings are not accepted until it works" % (JOURNAL, e))
+                return "busy"
             s.add(r["seq"])
             self.maxseq[sid] = max(top, r["seq"])
             if len(s) > 2 * WINDOW:
@@ -307,6 +392,7 @@ class Gateway:
             self.next_batch += 1
             self.stats["batches"] += 1
         self._save_state()
+        self._rewrite_journal()             # after state.json: see _replay_journal
         self.wake.set()
 
     # sending ----------------------------------------------------------
@@ -411,8 +497,9 @@ class Gateway:
 
     def send_pending(self) -> bool:
         """Submit pending batches, oldest first (a resend is a pending batch too). A failure stops the run (retry
-        later, keeps the order), except when the batch has now failed max_tries times: it goes to dead/ and the
-        next batches are tried. Returns True when nothing is left pending."""
+        later, keeps the order). With max_tries 0 (the default) a batch is tried until it works; with max_tries N
+        a batch that has failed N times goes to dead/ and the next batches are tried. Returns True when nothing is
+        left pending."""
         with self.send_lock:
             for p in self.pending_files():
                 if self.stop_by is not None and self.clock() >= self.stop_by:
@@ -433,8 +520,12 @@ class Gateway:
                     continue
                 if not ok:
                     tries = self._status(p)[1] + 1
-                    self.log("not sent%s: %s (try %d of %d)" % (again, os.path.basename(p), tries, self.max_tries))
-                    if tries >= self.max_tries:
+                    if self.max_tries:
+                        self.log("not sent%s: %s (try %d of %d)" % (again, os.path.basename(p), tries, self.max_tries))
+                    elif tries <= LOG_FIRST_TRIES or tries % LOG_TRIES_EVERY == 0:
+                        self.log("not sent%s: %s (try %d; kept, and tried again until it works)"
+                                 % (again, os.path.basename(p), tries))
+                    if self.max_tries and tries >= self.max_tries:
                         followed = self._back_to_settling(p)
                         if followed is None:                    # Kupo cannot say: decide at the next try
                             write_atomic(p + ".status", b"pending %d" % tries)
@@ -573,7 +664,9 @@ class Gateway:
 
 
 class Handler(socketserver.StreamRequestHandler):
-    """One sensor connection: one JSON reading per line."""
+    """One sensor connection: one JSON reading per line. Every non-empty line gets one answer line, in order, once
+    the reading is safe on disk: "ok", "dup" or "bad" (see Gateway.add_reading). When the gateway is stopping (or
+    cannot write its journal) it closes the connection without an answer: the sensor sends that reading again."""
 
     def handle(self):
         gw = self.server.gw
@@ -581,6 +674,12 @@ class Handler(socketserver.StreamRequestHandler):
             line = self.rfile.readline(MAX_LINE)
             if not line:
                 break
+            if len(line) >= MAX_LINE and not line.endswith(b"\n"):     # too long: skip the rest, one answer
+                while True:
+                    rest = self.rfile.readline(MAX_LINE)
+                    if not rest or rest.endswith(b"\n"):
+                        break
+                line = b"too long"
             line = line.strip()
             if not line:
                 continue
@@ -588,8 +687,14 @@ class Handler(socketserver.StreamRequestHandler):
                 raw = json.loads(line)
             except (ValueError, RecursionError):
                 gw.count_bad()
-                continue
-            if gw.add_reading(raw) == "closed":
+                answer = "bad"
+            else:
+                answer = gw.add_reading(raw)
+            if answer not in ("ok", "dup", "bad"):          # "closed" / "busy": not stored
+                break
+            try:
+                self.wfile.write(answer.encode() + b"\n")
+            except OSError:
                 break
 
 
@@ -614,7 +719,8 @@ def main() -> None:
                     help='template, e.g. "./submit.sh {file} {hash}" (no {..} = both appended)')
     ap.add_argument("--tx-reserve", type=int, default=layout.TX_RESERVE,
                     help="bytes of the transaction besides the metadata (plain ~300, contract ~1230)")
-    ap.add_argument("--max-tries", type=int, default=5, help="failed submits before a batch goes to dead/")
+    ap.add_argument("--max-tries", type=int, default=0,
+                    help="failed submits before a batch goes to dead/; 0 = never: try until it works")
     ap.add_argument("--retry", type=float, default=10.0, help="seconds between resends of pending batches")
     ap.add_argument("--kupo", default=os.environ.get("KUPO_URL"),
                     help="URL of Kupo, e.g. http://10.150.0.71:1442 (default: $KUPO_URL). With it, every submitted "
@@ -631,8 +737,8 @@ def main() -> None:
     a = ap.parse_args()
     if a.B < 1 or a.T <= 0:
         ap.error("--B must be >= 1 and --T > 0")
-    if a.max_tries < 1 or not 0 <= a.tx_reserve < layout.MAX_TX:
-        ap.error("--max-tries must be >= 1 and --tx-reserve between 0 and %d" % layout.MAX_TX)
+    if a.max_tries < 0 or not 0 <= a.tx_reserve < layout.MAX_TX:
+        ap.error("--max-tries must be >= 0 and --tx-reserve between 0 and %d" % layout.MAX_TX)
     if not layout.valid_id(a.gateway_id):
         ap.error("--gateway-id: use A-Z a-z 0-9 _ . -, 1-32 characters, not starting with 0x")
     if a.final_blocks < 1 or a.confirm_interval < 1 or a.missing_grace < 0:
