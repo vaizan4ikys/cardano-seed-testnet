@@ -157,6 +157,11 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
 
   The `.tx` file is JSON: `txid`, `slot`, `header` (block header hash), `block` (tip block when first seen) and `resends`
   (how often the batch was sent again). A restart keeps all of this: the settling batches are followed on.
+* **Stopping** (Ctrl-C or SIGTERM): the readings that wait in memory are written as a last batch, and pending batches
+  are still submitted for 20 s (`STOP_SEND`); the submit that runs then is finished. What is left stays pending
+  (`N batch(es) stay pending ...: sent at the next start`). Every batch waits for a block (it spends the change of the
+  one before), so a gateway that is behind (GW02 in the demo writes a batch every 5 s, about one per block) would
+  otherwise need one block per waiting batch to stop; in a `--show` on the VM it once took more than 45 s.
 * **Log lines:** `sent: FILE (transaction ...)`, `final: FILE (transaction ..., 60 blocks deep)`, `batch X: its transaction is no
   longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)` (only `sent: ` lines are new batches).
   `note from the submit command for FILE: ...` shows what `p1-batch.sh` said on stderr while it succeeded (the last 5

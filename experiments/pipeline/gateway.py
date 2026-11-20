@@ -41,7 +41,9 @@ replaced block back. The states:
 A restart keeps the settling batches and goes on with them. The node tip comes from reader.DockerTip (docker exec).
 check_batches.py reads an outbox and the chain and tells whether every batch arrived.
 The readings that wait in memory for their batch are lost if the process is killed
-(Ctrl-C and SIGTERM write them out first).
+(Ctrl-C and SIGTERM write them out first). On Ctrl-C or SIGTERM the pending batches are still submitted for at most
+STOP_SEND (20) seconds; the submit that runs then is finished; the rest stays pending and is sent at the next start.
+(Every batch waits for a block, so a gateway that is behind would otherwise need a block per waiting batch to stop.)
 """
 from __future__ import annotations
 
@@ -73,6 +75,7 @@ NOTE_LINES = 5          # at most this many stderr lines of a successful submit 
 FINAL_BLOCKS = 60       # blocks on top of a transaction until it is final (k of this chain)
 CONFIRM_INTERVAL = 15   # seconds between two looks at the batches that are not final yet
 MISSING_GRACE = 60      # seconds a transaction may be missing in Kupo before the batch is sent again
+STOP_SEND = 20          # seconds after Ctrl-C / SIGTERM in which pending batches are still submitted
 TXID_RE = re.compile(r"\b[0-9a-f]{64}\b")
 IN_PROGRESS = ("sent", "settling", "final")     # status words of a batch that was submitted (not "pending")
 
@@ -188,6 +191,7 @@ class Gateway:
         self.stop_ev = threading.Event()
         self.wake = threading.Event()
         self.threads = []
+        self.stop_by = None               # self.clock time from which no new submit starts (set by shutdown)
         self._load_state()
 
     # state ------------------------------------------------------------
@@ -411,6 +415,8 @@ class Gateway:
         next batches are tried. Returns True when nothing is left pending."""
         with self.send_lock:
             for p in self.pending_files():
+                if self.stop_by is not None and self.clock() >= self.stop_by:
+                    return False                        # stopping: the rest is sent at the next start
                 with open(p, "rb") as f:
                     h = layout.batch_hash(f.read())
                 if h not in os.path.basename(p):
@@ -547,8 +553,11 @@ class Gateway:
         for t in self.threads:
             t.start()
 
-    def shutdown(self):
-        """Stop the threads, write out the buffer, submit what is pending once more."""
+    def shutdown(self, send_for: float = STOP_SEND):
+        """Stop the threads, write out the buffer, and submit what is pending for at most send_for more seconds
+        (a submit that has started is finished). What is left stays pending and is sent at the next start."""
+        self.stop_by = self.clock() + send_for
+        self.log("stopping: %d batch(es) pending, sending for at most %g s more" % (len(self.pending_files()), send_for))
         self.stop_ev.set()
         self.wake.set()
         for t in self.threads:
@@ -557,6 +566,9 @@ class Gateway:
             self.flush_now()
             self.closed = True            # readings arriving later are refused and counted as "late"
         self.send_pending()
+        left = len(self.pending_files())
+        if left:
+            self.log("%d batch(es) stay pending (no time to send them while stopping): sent at the next start" % left)
         self.log("stopped: %s" % self.stats)
 
 

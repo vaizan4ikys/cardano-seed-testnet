@@ -4,7 +4,7 @@
 # Logs: /tmp/demo-logs/<name>.log   PID file: /tmp/demo-logs/pids   ("<name> <pid>" per line)
 #   remote.sh newrun | rundir              make a new run folder /tmp/demo-run-<time> / print the current one
 #   remote.sh start NAME DIR "COMMAND"     run COMMAND in DIR in the background (nohup), log + pid recorded
-#   remote.sh stop NAME | stop-all         SIGTERM, wait up to 45 s, then SIGKILL
+#   remote.sh stop NAME | stop-all         SIGTERM, wait up to 90 s, then SIGKILL
 #   remote.sh alive NAME | list | leftovers
 #   remote.sh count NAME REGEX | lines NAME REGEX [N] | deadcount DIR
 #   remote.sh ctr | tip | portfree PORT
@@ -26,10 +26,12 @@ ctr() { ( . "$REPO/scripts/lib.sh"; pool_container 1 ); }
 stop_one() {
   local p; p=$(pid_of "$1"); [ -n "$p" ] && kill -TERM "$p" 2>/dev/null; return 0
 }
-# stop_wait NAME...: wait until all are gone (45 s), then KILL the rest, then forget them
+# stop_wait NAME...: wait until all are gone (90 s), then KILL the rest, then forget them. A gateway sends its
+# pending batches for 20 s more and finishes the submit that runs then (up to about 65 s when a block is slow):
+# a KILL in the middle of a submit would make the next start report that batch as sent.
 stop_wait() {
   local n p i
-  for i in $(seq 1 90); do
+  for i in $(seq 1 180); do
     local any=0
     for n in "$@"; do is_alive "$n" && any=1; done
     [ $any = 0 ] && break
@@ -37,7 +39,7 @@ stop_wait() {
   done
   for n in "$@"; do
     if is_alive "$n"; then
-      p=$(pid_of "$n"); kill -KILL "$p" 2>/dev/null; echo "killed $n (did not stop in 45 s)"
+      p=$(pid_of "$n"); kill -KILL "$p" 2>/dev/null; echo "killed $n (did not stop in 90 s)"
     else
       echo "stopped $n"
     fi

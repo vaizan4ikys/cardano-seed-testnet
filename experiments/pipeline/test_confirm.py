@@ -424,6 +424,41 @@ class TestResendDoesNotBlock(FollowCase):
         self.assertEqual(self.gw.stats["resent"], 0)
 
 
+class TestStopIsBounded(unittest.TestCase):
+    """Ctrl-C / SIGTERM: a gateway that is behind (6 batches pending, each submit takes 8 s because it waits for a
+    block) must not need all 6 submits to stop: it sends for STOP_SEND seconds, the rest waits for the next start."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="stop-test-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.clock, self.logs, self.calls = FakeClock(), [], []
+
+    def slow_submit(self, path, h):
+        self.calls.append(os.path.basename(path))
+        self.clock.t += 8                     # waiting for the block
+        return True
+
+    def test_a_backlog_is_left_pending(self):
+        gw = gateway.Gateway(self.dir, 1, 10, self.slow_submit, clock=self.clock, log=self.logs.append)
+        for seq in range(1, 7):
+            gw.add_reading(reading(seq))      # B=1: six batch files, none sent yet
+        gw.shutdown(send_for=20)
+        self.assertEqual(len(self.calls), 3)  # started at 0, 8 and 16 s; at 24 s the time is up
+        self.assertEqual(len(gw.pending_files()), 3)
+        self.assertTrue(any("3 batch(es) stay pending" in m for m in self.logs), self.logs)
+        gw2 = gateway.Gateway(self.dir, 1, 10, self.slow_submit, clock=self.clock, log=self.logs.append)
+        self.assertTrue(gw2.send_pending())   # the next start sends the rest, oldest first
+        self.assertEqual(len(self.calls), 6)
+        self.assertEqual(self.calls, sorted(self.calls))
+
+    def test_without_a_backlog_everything_is_sent(self):
+        gw = gateway.Gateway(self.dir, 1, 10, self.slow_submit, clock=self.clock, log=self.logs.append)
+        gw.add_reading(reading(1))
+        gw.shutdown()
+        self.assertEqual(gw.pending_files(), [])
+        self.assertFalse(any("stay pending" in m for m in self.logs), self.logs)
+
+
 class TestFinalNeverEarly(FollowCase):
     def test_first_seen_late_is_counted_from_the_tip_of_that_moment(self):
         name = self.send_batches(1)[0]
