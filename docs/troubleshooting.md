@@ -31,10 +31,19 @@ forged blocks (59 of 1,008 in one 85-minute log; see `./scripts/fork-stats.sh` a
 It is not a bug in the scripts or the contract.
 **Fix:** run the failed step again; the new chain, the keys and the contract build are kept, so no rebuild is needed:
 `./experiments/demo/fresh.sh --from 7 --yes` (step 7 mints the registry token; use the number of the step that failed).
-Since 20 November 2026 the scripts send the same transaction again every 10 s while they wait, the registry and funding steps
+Since 20 November 2026 the scripts check every 10 s while they wait and send the same transaction again if it is neither in a
+block nor in the mempool; the registry and funding steps
 also wait for one more block on top, and the gateway keeps every batch until it is final (60 blocks), so a single dropped block
 should no longer stop anything.
 To see whether blocks were dropped around the time of the failure: `./scripts/fork-stats.sh --since "<date and time>" --list`.
+
+**The gateway log shows `submit command exit 1: ... BadInputsUTxO ...` and `not sent: ... (try 1 of 5)` right after a registry change.**
+Every batch transaction reads the registry coin. While the administrator's registry change waits in the mempool, the node refuses
+every new transaction that reads the old registry coin, so the gateway's batch fails until the change is in a block (seen in the
+demo on 20 November 2026: one or two failed tries at each change, then the batch went through; nothing was lost). Since then
+`p1-batch.sh` waits for the next block itself (at most 2 x 20 s) and builds again, and the gateway log shows `note from the submit
+command ...: ... waiting for the next block` instead. Before, a block slower than about 25 s could use up the gateway's 5 tries and move a
+good batch to `dead/`.
 
 **A new transaction fails with "All inputs are spent".**
 The previous transaction was not in a block yet. `send-metadata.sh` and `test-tx.sh` wait for the
