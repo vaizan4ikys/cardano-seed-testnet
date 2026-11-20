@@ -118,7 +118,7 @@ automatically if the estimate ever exceeds the limit.
 critical sensor data, so the gateway does not stop at "the transaction was in a block once":
 
 * **Why.** A block can be replaced by a competing block (two pools make a block for the same slot; on the lab chain about
-  6 % of the forged blocks: 59 of 1,008 in 85 minutes, seen in the node logs). Cardano does **not** put the transactions of a replaced block back into the mempool.
+  6 to 7 % of the forged blocks: 59 of 1,008 in 85 minutes, 124 of 1,692 in 127 minutes, seen in the node logs). Cardano does **not** put the transactions of a replaced block back into the mempool.
   The submit command returns 0 as soon as the transaction is in a block, so without more care the batch (about 100
   readings) would be lost and nobody would notice.
 * **What the gateway does** (needs `--kupo URL`; `demo.sh` passes it). It keeps the transaction id of every submitted batch
@@ -161,6 +161,12 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
   longer in the chain (block replaced): sending it again`, `sent again: FILE (new transaction ..., resend 1)` (only `sent: ` lines are new batches).
   `note from the submit command for FILE: ...` shows what `p1-batch.sh` said on stderr while it succeeded (the last 5
   lines), for example `the transaction was lost (not in a block, not in the mempool): sent the same transaction again`.
+* **Tested on the VM** (20 November 2026, local mode). In a 2-hour run (760 batches) no batch was lost and none had to
+  be sent again, although 7.3 % of the blocks were replaced ([FAQ 11](../../docs/FAQ.md)). So the resend was forced: the
+  `txid` in the `.tx` file of a settling batch was replaced by a fake one while the gateway ran. 68 s later the gateway
+  logged `no longer in the chain` and sent the file again; `p1-batch.sh` found the real transaction in the chain
+  (`already sent`, nothing new built), the gateway logged `sent again: ... (new transaction 732d7a79ba66..., resend 1)`
+  with the real id, and the batch became final. `check_batches.py`: 101 of 101 batches final, 0 lost, 0 twice.
 * **Options:** `--kupo URL` (default `$KUPO_URL`; without it nothing is followed and a warning is logged), `--final-blocks 60`,
   `--confirm-interval 15`, `--missing-grace 60`, `--container` and `--magic` (for the node tip, as in `server.py`).
 
