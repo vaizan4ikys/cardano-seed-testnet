@@ -636,6 +636,21 @@ class TestCheckBatches(unittest.TestCase):
         self.assertEqual(self.groups(result), {"final": 1, "settling": 2, "pending": 0, "dead": 0, "LOST": 1})
         self.assertEqual(result[b[3][0]]["group"], "LOST")
 
+    def test_a_batch_on_the_chain_twice_is_reported(self):
+        b = self.write_batches(2)
+        for i, (name, obj) in enumerate(b):
+            self.put_on_chain(obj, 4000 + i, txid_of(1 + i))
+            self.set_status(name, "settling", {"txid": txid_of(1 + i), "slot": 4000 + i, "block": 800})
+        text = check_batches.report(list(self.run_check().values()), K, False)
+        self.assertIn("OK: no batch is on the chain twice", text)
+        self.put_on_chain(b[0][1], 4500, txid_of(9))           # the same batch in a second transaction
+        result = self.run_check()
+        self.assertEqual(result[b[0][0]]["copies"], 2)
+        self.assertEqual(result[b[1][0]]["copies"], 1)
+        text = check_batches.report(list(result.values()), K, False)
+        self.assertIn("TWICE: 1 batches", text)
+        self.assertIn("%s (2 transactions)" % b[0][0], text)
+
     def test_gateway_id_filter(self):
         self.write_batches(2)
         self.assertEqual(len(self.run_check("GW01")), 2)

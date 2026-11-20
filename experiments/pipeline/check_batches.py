@@ -11,6 +11,9 @@ Every batch file of the outbox ends in exactly one group:
   dead      in dead/: refused for good (for example the gateway is not approved) or failed too often
             (some may have been sent before); not in the chain
   LOST      the gateway says "sent", but the batch is NOT in the chain: the readings are gone
+Also counted: batches that are on the chain TWICE (in two different transactions). That must never happen (p1-batch.sh
+does not build a second transaction while the first one can still land); if it does, the readings are there twice and
+the fee was paid twice.
 
 How a batch is found on the chain (the first that works):
   1. by its transaction id, when the gateway stored one (batch-....json.tx, written by the new gateway.py)
@@ -21,7 +24,7 @@ How deep it is: a batch the new gateway has seen in a block has its block number
 estimate is used (reader.estimated_block: tip block and slots). The tip comes from docker exec (reader.DockerTip); where
 docker is not available, from Kupo's slot (about 0.2 blocks per slot): then "settling/final" is only approximate.
 
-Exit code: 0 = nothing LOST, 1 = something LOST, 2 = Kupo cannot be read. Standard library only.
+Exit code: 0 = nothing LOST and nothing twice, 1 = something LOST or on the chain twice, 2 = Kupo cannot be read. Standard library only.
 """
 from __future__ import annotations
 
@@ -90,6 +93,7 @@ class Chain:
     def __init__(self, kupo: Any):
         self.kupo = kupo
         self._by_hash = None            # batch hash -> (slot, txid)
+        self._txids = None              # batch hash -> every transaction that carries a batch with this hash
         self._by_reading = None         # (gateway, sensor, seq) -> highest slot of a batch that holds it
 
     def by_txid(self, txid: str) -> Optional[int]:
@@ -99,7 +103,7 @@ class Chain:
 
     def _read_all(self) -> None:
         """Read every transaction of the chain that carries one of our batches."""
-        self._by_hash, self._by_reading = {}, {}
+        self._by_hash, self._by_reading, self._txids = {}, {}, {}
         for slot, txid in self.kupo.new_transactions(0):
             obj, h, _ = self.kupo.batch(slot, txid)
             if obj is None:
@@ -109,6 +113,7 @@ class Chain:
             except (ValueError, KeyError, TypeError):
                 continue                                    # a label-1000 transaction of another layout
             self._by_hash[h] = (slot, txid)
+            self._txids.setdefault(h, set()).add(txid)
             for r in parsed["readings"]:
                 key = (parsed["gateway"], r["sensor"], r["seq"])
                 self._by_reading[key] = max(slot, self._by_reading.get(key, 0))
@@ -119,6 +124,12 @@ class Chain:
             self._read_all()
         found = self._by_hash.get(h)
         return found[0] if found else None
+
+    def copies(self, h: str) -> int:
+        """In how many different transactions a batch with this hash is on the chain (0 if in none)."""
+        if self._txids is None:
+            self._read_all()
+        return len(self._txids.get(h, ()))
 
     def by_content(self, readings: set) -> Optional[int]:
         """Highest slot of the batches that hold the readings, if EVERY reading is on the chain; else None."""
@@ -159,9 +170,10 @@ def depth_of(entry: Dict[str, Any], slot: int, tip: Optional[Dict[str, Any]]) ->
 
 def classify(entries: List[Dict[str, Any]], chain: Chain, final_blocks: int,
              tip: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Add "group" (one of GROUPS), "slot", "found" (how) and "depth" to every entry."""
+    """Add "group" (one of GROUPS), "slot", "found" (how), "depth" and "copies" (in how many transactions the
+    batch is on the chain) to every entry."""
     for e in entries:
-        e.update({"slot": None, "found": "", "depth": None})
+        e.update({"slot": None, "found": "", "depth": None, "copies": chain.copies(e["hash"])})
         if e["dead"]:
             e["group"] = DEAD
         elif e["status"] not in SENT_WORDS:
@@ -198,6 +210,15 @@ def report(entries: List[Dict[str, Any]], final_blocks: int, show_list: bool) ->
     by_content = [e for e in entries if e["found"] == "content"]
     if by_content:
         lines.append("  (%d batches were found by their readings, not by hash or transaction id)" % len(by_content))
+    twice = [e for e in entries if e["copies"] > 1]
+    if twice:
+        lines.append("TWICE: %d batches are on the chain in more than one transaction:" % len(twice))
+        for e in twice[: None if show_list else 10]:
+            lines.append("  %s (%d transactions)" % (e["name"], e["copies"]))
+        if len(twice) > 10 and not show_list:
+            lines.append("  ... (--list shows all)")
+    else:
+        lines.append("OK: no batch is on the chain twice")
     if count[LOST]:
         lines.append("LOST: %d batches, %d readings are not in the chain:"
                      % (len(count[LOST]), sum(len(e["readings"]) for e in count[LOST])))
@@ -241,7 +262,7 @@ def main() -> int:
         return 2
     print("outbox %s, gateway %s, Kupo %s, %s" % (a.outbox, a.gateway_id or "(any)", a.kupo, tip_text))
     print(report(entries, a.final_blocks, a.list))
-    return 1 if any(e["group"] == LOST for e in entries) else 0
+    return 1 if any(e["group"] == LOST or e["copies"] > 1 for e in entries) else 0
 
 
 if __name__ == "__main__":
