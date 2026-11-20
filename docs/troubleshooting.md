@@ -43,7 +43,7 @@ every new transaction that reads the old registry coin, so the gateway's batch f
 demo on 20 November 2026: one or two failed tries at each change, then the batch went through; nothing was lost). Since then
 `p1-batch.sh` waits for the next block itself (at most 2 x 20 s) and builds again, and the gateway log shows `note from the submit
 command ...: ... waiting for the next block` instead. Before, a block slower than about 25 s could use up the gateway's 5 tries and move a
-good batch to `dead/`.
+good batch to `dead/`. (Since 20 November 2026 the gateway does not give up a batch at all, see the FAQ, section 6.)
 
 **A new transaction fails with "All inputs are spent".**
 The previous transaction was not in a block yet. `send-metadata.sh` and `test-tx.sh` wait for the

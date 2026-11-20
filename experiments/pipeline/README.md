@@ -6,6 +6,7 @@ back through Kupo, and `page.html` shows it. The whole thing is started and show
 
 * [The layout of the data](#cardano-metadata-rules-that-shape-the-layout) a gateway writes into one transaction, and how big it is.
   Code: `layout.py` (layout, hash, size rules), `calc_size.py` (the size table below).
+* [No reading is given up on the way](#no-reading-is-given-up-on-the-way): sensor -> gateway -> batch -> chain.
 * [The gateway](#the-gateway-from-sent-to-final): how it keeps every batch until it is final; `check_batches.py` checks an
   outbox against the chain.
 * [The web page](#the-web-page) and its server.
@@ -112,6 +113,32 @@ reading. The price of a bigger B is a longer batch-fill wait (B divided by the r
 site). B=100 is also the value of the earlier load tests, so the results stay comparable. The gateway splits a batch
 automatically if the estimate ever exceeds the limit.
 
+## No reading is given up on the way
+
+Where a reading could get lost between the sensor and the chain, and what prevents it (since 20 November 2026):
+
+| where | before | now |
+|---|---|---|
+| sensor -> gateway (gateway stopped, restarting, network cut) | `sensor.py` tried 5 times, then dropped the reading | the sensor keeps every reading until the gateway confirms it; while the gateway is away the readings wait (up to 100,000) and go out when it is back |
+| in the gateway, waiting for its batch (up to T seconds) | lost on a crash or `kill -9` | written to `buffer.jsonl` in the outbox (on disk) before the gateway confirms it; the next start puts it back into the buffer |
+| a batch whose submit fails (node down, network cut) | moved to `dead/` after 5 tries (`--max-tries 5`): lost | tried again every `--retry` seconds until it works (`--max-tries 0`, the new default; the log shows the first 5 tries, then every 12th) |
+| a batch in a replaced block | kept until final, sent again ([below](#the-gateway-from-sent-to-final)) | the same |
+| a batch the contract refuses (gateway not approved, or revoked) | `dead/` | `dead/`, on purpose: refusing it is the contract's job. The readings stay in the `dead/` files, not on the chain |
+
+* **The confirmation.** The gateway answers every reading line with one line, in order, once the reading is on disk:
+  `ok` (stored), `dup` (stored before) or `bad` (not a valid reading, never stored). A reading without an answer is sent again
+  after a reconnect; the gateway knows it by sensor and sequence number, answers `dup`, and stores it once.
+* **What is still not covered:** a sensor that is stopped while its gateway is away (its waiting readings are in memory;
+  at the end it prints `N not confirmed`), and the disk of the gateway machine (until a batch is on the chain, the
+  outbox is its only copy).
+* **The check.** `check_batches.py` also checks every sensor's sequence numbers: a number missing between two numbers
+  of the same sensor run is a reading that never got into a batch (`MISSING: ...`, exit code 1).
+* **Tested.** Unit tests: a crash and a `kill -9` of the gateway (every sequence number of every sensor ends up in a batch,
+  exactly once), the chain down for 30 tries, a sensor started before its gateway, resends. On the VM (20 November 2026,
+  real chain, GW01 with 10 sensors, T = 10 s): pool 1 (node and Kupo) paused for 3 minutes; the waiting batch failed at least
+  12 times, then went through; nothing went to `dead/`. `check_batches.py`: 209 batches, 20,788 readings, 0 lost, 0 twice,
+  no sequence number missing. A `kill -9` on the real chain is still to do (the first try killed the wrong process).
+
 ## The gateway: from "sent" to "final"
 
 `gateway.py` writes the batch files and sends them (`--submit command`, normally `submit_contract.sh`). A batch is
@@ -150,14 +177,14 @@ critical sensor data, so the gateway does not stop at "the transaction was in a 
 
   | `.status` | meaning |
   |---|---|
-  | `pending` / `pending <n>` | not sent yet / failed n times (after `--max-tries` it goes to `dead/`) |
+  | `pending` / `pending <n>` | not sent yet / failed n times (tried again until it works; only with `--max-tries N` it goes to `dead/` after N) |
   | `settling` | submitted; the transaction is in the `.tx` file; followed until final |
   | `final` | final, nothing more to do |
   | `sent` | submitted but not followed: dry mode, no `--kupo`, no transaction id in the output, or an outbox of the old gateway |
 
   The `.tx` file is JSON: `txid`, `slot`, `header` (block header hash), `block` (tip block when first seen) and `resends`
   (how often the batch was sent again). A restart keeps all of this: the settling batches are followed on.
-* **Stopping** (Ctrl-C or SIGTERM): the readings that wait in memory are written as a last batch, and pending batches
+* **Stopping** (Ctrl-C or SIGTERM): the readings that wait in memory (and in `buffer.jsonl`) are written as a last batch, and pending batches
   are still submitted for 20 s (`STOP_SEND`); the submit that runs then is finished. What is left stays pending
   (`N batch(es) stay pending ...: sent at the next start`). Every batch waits for a block (it spends the change of the
   one before), so a gateway that is behind (GW02 in the demo writes a batch every 5 s, about one per block) would

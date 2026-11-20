@@ -67,10 +67,13 @@ case "${1:-}" in
   stop) stop_one "$2"; stop_wait "$2" ;;
   stop-all)
     names=$(awk '{print $1}' "$PIDFILE" | sort -u)
-    # stop order: sensors first (they feed the gateways), then gateways, then the server
-    order=""; for n in $names; do case $n in sensors*) order="$order $n";; esac; done
-    for n in $names; do case $n in sensors*|server) ;; *) order="$order $n";; esac; done
+    # stop order: the sensors first, and they are waited for (a sensor waits up to 10 s for the gateway to confirm
+    # its last readings), then the gateways, then the server
+    sensors=""; for n in $names; do case $n in sensors*) sensors="$sensors $n";; esac; done
+    order=""; for n in $names; do case $n in sensors*|server) ;; *) order="$order $n";; esac; done
     for n in $names; do [ "$n" = server ] && order="$order $n"; done
+    for n in $sensors; do stop_one "$n"; done
+    [ -n "$sensors" ] && stop_wait $sensors
     for n in $order; do stop_one "$n"; done
     [ -n "$order" ] && stop_wait $order
     : > "$PIDFILE" ;;
